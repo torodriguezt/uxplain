@@ -11,3 +11,4 @@ numpy
 crepes
 shap
 matplotlib
+tqdm

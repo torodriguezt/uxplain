@@ -1,29 +1,70 @@
-from pathlib import Path
+"""
+Visualization utilities for SHAP explanations.
+"""
 
-from loguru import logger
-from tqdm import tqdm
-import typer
+from __future__ import annotations
 
-from uncertainty_explainer.config import FIGURES_DIR, PROCESSED_DATA_DIR
-
-app = typer.Typer()
+import shap
+import matplotlib.pyplot as plt
 
 
-@app.command()
-def main(
-    # ---- REPLACE DEFAULT PATHS AS APPROPRIATE ----
-    input_path: Path = PROCESSED_DATA_DIR / "dataset.csv",
-    output_path: Path = FIGURES_DIR / "plot.png",
-    # -----------------------------------------
+def generate_default_plots(
+    shap_values,
+    X,
+    show: bool = True,
 ):
-    # ---- REPLACE THIS WITH YOUR OWN CODE ----
-    logger.info("Generating plot from data...")
-    for i in tqdm(range(10), total=10):
-        if i == 5:
-            logger.info("Something happened for iteration 5.")
-    logger.success("Plot generation complete.")
-    # -----------------------------------------
+    """
+    Generate standard SHAP plots.
 
+    Includes:
+    - summary plot
+    - bar plot
+    - beeswarm plot
 
-if __name__ == "__main__":
-    app()
+    Parameters
+    ----------
+    shap_values
+        SHAP explanation object.
+
+    X : np.ndarray
+
+    show : bool
+        Whether to display plots.
+
+    Returns
+    -------
+    dict
+        Dictionary with matplotlib figures.
+    """
+
+    figures = {}
+
+    # Summary plot
+    plt.figure()
+    shap.summary_plot(
+        shap_values,
+        X,
+        show=False,
+    )
+    figures["summary"] = plt.gcf()
+
+    # Bar plot
+    plt.figure()
+    shap.plots.bar(
+        shap_values,
+        show=False,
+    )
+    figures["bar"] = plt.gcf()
+
+    # Beeswarm
+    plt.figure()
+    shap.plots.beeswarm(
+        shap_values,
+        show=False,
+    )
+    figures["beeswarm"] = plt.gcf()
+
+    if show:
+        plt.show()
+
+    return figures
