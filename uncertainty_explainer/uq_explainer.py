@@ -103,19 +103,37 @@ class UncertaintyExplanationPipeline:
 
         if generate_plots:
 
+            import matplotlib.pyplot as plt
             import shap
 
-            shap.plots.beeswarm(
-                shap_values
-            )
+            plt.rcParams.update({
+                "font.family": "sans-serif",
+                "font.size": 12,
+                "axes.labelsize": 13,
+                "axes.titlesize": 14,
+                "axes.titleweight": "bold",
+                "xtick.labelsize": 11,
+                "ytick.labelsize": 11,
+                "figure.facecolor": "white",
+                "axes.facecolor": "#fafafa",
+                "axes.edgecolor": "#cccccc",
+                "axes.linewidth": 0.8,
+            })
 
-            shap.plots.bar(
-                shap_values
-            )
+            shap.plots.beeswarm(shap_values, show=False)
+            plt.gcf().set_size_inches(10, 6)
+            plt.tight_layout()
+            plt.show()
 
-            shap.plots.waterfall(
-                shap_values[0]
-            )
+            shap.plots.bar(shap_values, show=False)
+            plt.gcf().set_size_inches(10, 5)
+            plt.tight_layout()
+            plt.show()
+
+            shap.plots.waterfall(shap_values[0], show=False)
+            plt.gcf().set_size_inches(10, 5)
+            plt.tight_layout()
+            plt.show()
 
         return {
             "lower": lower,
