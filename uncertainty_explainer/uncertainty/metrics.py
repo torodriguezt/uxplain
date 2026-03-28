@@ -7,6 +7,8 @@ that can be explained using SHAP.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 
 
@@ -37,7 +39,7 @@ def interval_width(
 def make_interval_width_function(
     conformal_predictor,
     confidence: float = 0.9,
-):
+) -> Callable[[np.ndarray], np.ndarray]:
     """
     Create callable function for SHAP.
 
@@ -54,19 +56,17 @@ def make_interval_width_function(
 
     Returns
     -------
-    callable
+    Callable[[np.ndarray], np.ndarray]
         Function f(X) → interval width.
     """
 
-    def interval_width_function(X):
+    def interval_width_function(X: np.ndarray) -> np.ndarray:
 
         lower, upper = conformal_predictor.predict(
             X,
             confidence=confidence,
         )
 
-        width = upper - lower
-
-        return width
+        return interval_width(lower, upper)
 
     return interval_width_function
