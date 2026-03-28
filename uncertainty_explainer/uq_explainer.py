@@ -46,12 +46,10 @@ class UncertaintyExplanationPipeline:
         )
 
 
-        self.shap_explainer = (
-        UncertaintyShapExplainer(
-        cp=self.cp,
-        confidence=self.confidence,
-    )
-)
+        self.shap_explainer = UncertaintyShapExplainer(
+            cp=self.cp,
+            confidence=self.confidence,
+        )
 
     def fit(
         self,
@@ -85,7 +83,7 @@ class UncertaintyExplanationPipeline:
         if X_background is None:
             X_background = X[:100]
 
-        # Build SHAP explainer
+        # TODO: Move build_explainer to fit() to avoid rebuilding on every call
         self.shap_explainer.build_explainer(
             X_background,
             algorithm
@@ -97,7 +95,9 @@ class UncertaintyExplanationPipeline:
             )
         )
 
-        lower, upper = self.cp.predict(X)
+        lower, upper = self.cp.predict(
+            X, confidence=self.confidence
+        )
 
         width = upper - lower
 
