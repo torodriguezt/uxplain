@@ -7,9 +7,21 @@ for interval prediction.
 
 from __future__ import annotations
 
-import numpy as np
+from typing import Literal
+
 from crepes import WrapRegressor
-from crepes.extras import DifficultyEstimator
+from crepes.extras import (
+    DifficultyEstimator,
+    MondrianCategorizer,
+)
+import numpy as np
+
+ConformalMethod = Literal[
+    "standard",
+    "normalized",
+    "mondrian",
+    "normalized_mondrian",
+]
 
 
 class ConformalPredictor:
@@ -20,12 +32,26 @@ class ConformalPredictor:
     ----------
     model : object
         Any sklearn-compatible regressor.
+    method : ConformalMethod
+        Conformal prediction method to use:
+        - "standard": basic conformal prediction
+        - "normalized": uses a DifficultyEstimator for
+          adaptive interval widths
+        - "mondrian": uses a MondrianCategorizer for
+          group-conditional coverage
+        - "normalized_mondrian": combines both
     """
 
-    def __init__(self, model):
+    def __init__(
+        self,
+        model,
+        method: ConformalMethod = "normalized",
+    ):
         self.model = model
+        self.method = method
         self.wrapper = None
-        self.difficulty_estimator = DifficultyEstimator()
+        self.difficulty_estimator = None
+        self.mondrian_categorizer = None
 
     def fit(
         self,
@@ -40,7 +66,8 @@ class ConformalPredictor:
 
         Steps:
         1. Fit model
-        2. Calibrate conformal predictor
+        2. Fit difficulty estimator and/or Mondrian categorizer
+        3. Calibrate conformal predictor
         """
 
         # Train
@@ -49,7 +76,18 @@ class ConformalPredictor:
             y_train,
         )
 
-        self.difficulty_estimator.fit(X_train, y=y_train)
+        # Build calibration kwargs based on method
+        calibrate_kwargs = {}
+
+        if self.method in ("normalized", "normalized_mondrian"):
+            self.difficulty_estimator = DifficultyEstimator()
+            self.difficulty_estimator.fit(X_train, y=y_train)
+            calibrate_kwargs["de"] = self.difficulty_estimator
+
+        if self.method in ("mondrian", "normalized_mondrian"):
+            self.mondrian_categorizer = MondrianCategorizer()
+            self.mondrian_categorizer.fit(X_train, y=y_train)
+            calibrate_kwargs["mc"] = self.mondrian_categorizer
 
         self.wrapper = WrapRegressor(
             self.model
@@ -59,7 +97,7 @@ class ConformalPredictor:
         self.wrapper.calibrate(
             X_calib,
             y_calib,
-            de=self.difficulty_estimator,
+            **calibrate_kwargs,
         )
 
     def predict(

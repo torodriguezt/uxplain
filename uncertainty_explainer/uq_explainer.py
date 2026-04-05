@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .conformal.predictor import ConformalPredictor
+from .conformal.predictor import ConformalMethod, ConformalPredictor
 from .explainability.explainer import (
     UncertaintyShapExplainer,
 )
@@ -25,6 +25,7 @@ class UncertaintyExplanationPipeline:
         self,
         model,
         confidence: float = 0.9,
+        conformal_method: ConformalMethod = "normalized",
     ):
         """
         Initialize pipeline.
@@ -35,6 +36,9 @@ class UncertaintyExplanationPipeline:
             sklearn-compatible regressor.
 
         confidence : float
+
+        conformal_method : ConformalMethod
+            Conformal prediction method to use.
         """
 
         self.model = model
@@ -42,7 +46,8 @@ class UncertaintyExplanationPipeline:
 
         # Conformal predictor
         self.cp = ConformalPredictor(
-            self.model
+            self.model,
+            method=conformal_method,
         )
 
 
