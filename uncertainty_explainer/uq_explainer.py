@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from typing import Any
+
 import numpy as np
-import shap
 from sklearn.model_selection import train_test_split
 
 from .conformal.crepes_predictor import (
@@ -36,14 +37,14 @@ class ExplanationResult:
         Upper prediction bounds.
     interval_width : np.ndarray
         Width of each prediction interval.
-    shap_values : shap.Explanation
-        SHAP explanation object.
+    explanation_values : Any
+        Explanation object (e.g. shap.Explanation, lime output).
     """
 
     lower: np.ndarray
     upper: np.ndarray
     interval_width: np.ndarray
-    shap_values: shap.Explanation
+    explanation_values: Any
 
 
 class UncertaintyExplanationPipeline:
@@ -109,7 +110,7 @@ class UncertaintyExplanationPipeline:
         )
 
         self._is_fitted = False
-        self._explainer_algorithm = None
+        self._explainer_kwargs = None
         self._feature_names = None
 
     def fit(
@@ -141,9 +142,11 @@ class UncertaintyExplanationPipeline:
             Defaults to X_calib.
         """
 
-        # Extract feature names from DataFrame before converting
+        # Extract feature names from DataFrame
         if hasattr(X_train, "columns"):
             self._feature_names = list(X_train.columns)
+            if hasattr(self.explainer, "feature_names"):
+                self.explainer.feature_names = self._feature_names
 
         # Auto-split if calibration set not provided
         if X_calib is None or y_calib is None:
@@ -163,7 +166,7 @@ class UncertaintyExplanationPipeline:
             else X_calib
         )
         self._is_fitted = True
-        self._explainer_algorithm = None
+        self._explainer_kwargs = None
 
     def predict(
         self,
@@ -196,20 +199,17 @@ class UncertaintyExplanationPipeline:
     def explain_uncertainty(
         self,
         X,
-        algorithm: str = "auto",
         show_plots: bool = True,
         plot_kind: str | list[str] | None = None,
         waterfall_index: int = 0,
+        **explainer_kwargs,
     ) -> ExplanationResult:
         """
-        Explain interval width uncertainty using SHAP.
+        Explain interval width uncertainty.
 
         Parameters
         ----------
         X : np.ndarray
-        algorithm : str
-            SHAP algorithm ("auto", "permutation", etc.).
-            The explainer is rebuilt only when algorithm changes.
         show_plots : bool
             Whether to display plots.
         plot_kind : str or list of str, optional
@@ -217,23 +217,23 @@ class UncertaintyExplanationPipeline:
             "waterfall", "summary". Defaults to all.
         waterfall_index : int
             Sample index for waterfall plot.
+        **explainer_kwargs
+            Passed to explainer.fit(). For the default SHAP
+            explainer: algorithm="auto", "permutation", etc.
         """
 
         self._check_is_fitted()
         self._check_X(X)
 
-        # Rebuild explainer only if algorithm changed
-        if self._explainer_algorithm != algorithm:
+        # Rebuild explainer if kwargs changed
+        if self._explainer_kwargs != explainer_kwargs:
             self.explainer.fit(
                 self._X_background,
-                algorithm,
+                **explainer_kwargs,
             )
-            self._explainer_algorithm = algorithm
+            self._explainer_kwargs = explainer_kwargs
 
-        shap_values = self.explainer.explain(X)
-
-        if self._feature_names is not None:
-            shap_values.feature_names = self._feature_names
+        explanation_values = self.explainer.explain(X)
 
         lower, upper = self.cp.predict(
             X, confidence=self.confidence
@@ -243,7 +243,7 @@ class UncertaintyExplanationPipeline:
         if show_plots:
             kinds = self._resolve_plot_kinds(plot_kind)
             generate_default_plots(
-                shap_values,
+                explanation_values,
                 X,
                 kinds=kinds,
                 feature_names=self._feature_names,
@@ -254,23 +254,23 @@ class UncertaintyExplanationPipeline:
             lower=lower,
             upper=upper,
             interval_width=width,
-            shap_values=shap_values,
+            explanation_values=explanation_values,
         )
 
     def plot(
         self,
-        shap_values,
+        explanation_values,
         X=None,
         kind: str | list[str] = "beeswarm",
         waterfall_index: int = 0,
     ):
         """
-        Generate specific SHAP plot(s) from existing results.
+        Generate specific plot(s) from existing results.
 
         Parameters
         ----------
-        shap_values : shap.Explanation
-            SHAP values from explain_uncertainty().
+        explanation_values
+            Explanation values from explain_uncertainty().
         X : np.ndarray, optional
         kind : str or list of str
         waterfall_index : int
@@ -278,7 +278,7 @@ class UncertaintyExplanationPipeline:
 
         kinds = self._resolve_plot_kinds(kind)
         generate_default_plots(
-            shap_values,
+            explanation_values,
             X,
             kinds=kinds,
             feature_names=self._feature_names,
