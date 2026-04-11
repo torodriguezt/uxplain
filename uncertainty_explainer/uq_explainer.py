@@ -4,16 +4,46 @@ Main pipeline for uncertainty explanation.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
+import shap
 from sklearn.model_selection import train_test_split
 
-from .conformal.predictor import ConformalMethod, ConformalPredictor
-from .explainability.explainer import (
-    UncertaintyShapExplainer,
+from .conformal.crepes_predictor import (
+    ConformalMethod,
+    CrepesConformalPredictor,
 )
+from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .plots import generate_default_plots
+from .protocols import (
+    ConformalPredictorProtocol,
+    UncertaintyExplainerProtocol,
+)
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
+
+
+@dataclass
+class ExplanationResult:
+    """Result of explain_uncertainty().
+
+    Attributes
+    ----------
+    lower : np.ndarray
+        Lower prediction bounds.
+    upper : np.ndarray
+        Upper prediction bounds.
+    interval_width : np.ndarray
+        Width of each prediction interval.
+    shap_values : shap.Explanation
+        SHAP explanation object.
+    """
+
+    lower: np.ndarray
+    upper: np.ndarray
+    interval_width: np.ndarray
+    shap_values: shap.Explanation
 
 
 class UncertaintyExplanationPipeline:
@@ -30,6 +60,8 @@ class UncertaintyExplanationPipeline:
         model,
         confidence: float = 0.9,
         conformal_method: ConformalMethod = "normalized",
+        conformal_predictor: ConformalPredictorProtocol | None = None,
+        explainer: UncertaintyExplainerProtocol | None = None,
     ):
         """
         Initialize pipeline.
@@ -43,17 +75,26 @@ class UncertaintyExplanationPipeline:
 
         conformal_method : ConformalMethod
             Conformal prediction method to use.
+            Ignored if conformal_predictor is provided.
+
+        conformal_predictor : ConformalPredictorProtocol, optional
+            Custom conformal predictor. If not provided,
+            defaults to CrepesConformalPredictor.
+
+        explainer : UncertaintyExplainerProtocol, optional
+            Custom uncertainty explainer. If not provided,
+            defaults to ShapUncertaintyExplainer.
         """
 
         self.model = model
         self.confidence = confidence
 
-        self.cp = ConformalPredictor(
+        self.cp = conformal_predictor or CrepesConformalPredictor(
             self.model,
             method=conformal_method,
         )
 
-        self.shap_explainer = UncertaintyShapExplainer(
+        self.explainer = explainer or ShapUncertaintyExplainer(
             cp=self.cp,
             confidence=self.confidence,
         )
@@ -150,7 +191,7 @@ class UncertaintyExplanationPipeline:
         show_plots: bool = True,
         plot_kind: str | list[str] | None = None,
         waterfall_index: int = 0,
-    ):
+    ) -> ExplanationResult:
         """
         Explain interval width uncertainty using SHAP.
 
@@ -174,14 +215,14 @@ class UncertaintyExplanationPipeline:
 
         # Rebuild explainer only if algorithm changed
         if self._explainer_algorithm != algorithm:
-            self.shap_explainer.build_explainer(
+            self.explainer.build_explainer(
                 self._X_background,
                 algorithm,
             )
             self._explainer_algorithm = algorithm
 
         shap_values = (
-            self.shap_explainer.compute_shap_values(X)
+            self.explainer.compute_shap_values(X)
         )
 
         if self._feature_names is not None:
@@ -202,12 +243,12 @@ class UncertaintyExplanationPipeline:
                 waterfall_index=waterfall_index,
             )
 
-        return {
-            "lower": lower,
-            "upper": upper,
-            "interval_width": width,
-            "shap_values": shap_values,
-        }
+        return ExplanationResult(
+            lower=lower,
+            upper=upper,
+            interval_width=width,
+            shap_values=shap_values,
+        )
 
     def plot(
         self,
