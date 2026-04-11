@@ -34,13 +34,13 @@ class ConformalPredictorProtocol(Protocol):
 class UncertaintyExplainerProtocol(Protocol):
     """Interface for uncertainty explainers."""
 
-    def build_explainer(
+    def fit(
         self,
         X_background: np.ndarray,
         algorithm: str | None = None,
     ) -> None: ...
 
-    def compute_shap_values(
+    def explain(
         self,
         X: np.ndarray,
     ) -> Any: ...

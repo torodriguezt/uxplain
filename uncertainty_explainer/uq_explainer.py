@@ -57,7 +57,7 @@ class UncertaintyExplanationPipeline:
 
     def __init__(
         self,
-        model,
+        model=None,
         confidence: float = 0.9,
         conformal_method: ConformalMethod = "normalized",
         conformal_predictor: ConformalPredictorProtocol | None = None,
@@ -69,7 +69,9 @@ class UncertaintyExplanationPipeline:
         Parameters
         ----------
         model
-            sklearn-compatible regressor.
+            sklearn-compatible regressor. Required when using
+            the default CrepesConformalPredictor. Can be omitted
+            if a custom conformal_predictor is provided.
 
         confidence : float
 
@@ -79,20 +81,27 @@ class UncertaintyExplanationPipeline:
 
         conformal_predictor : ConformalPredictorProtocol, optional
             Custom conformal predictor. If not provided,
-            defaults to CrepesConformalPredictor.
+            defaults to CrepesConformalPredictor(model).
 
         explainer : UncertaintyExplainerProtocol, optional
             Custom uncertainty explainer. If not provided,
             defaults to ShapUncertaintyExplainer.
         """
 
-        self.model = model
         self.confidence = confidence
 
-        self.cp = conformal_predictor or CrepesConformalPredictor(
-            self.model,
-            method=conformal_method,
-        )
+        if conformal_predictor is not None:
+            self.cp = conformal_predictor
+        elif model is not None:
+            self.cp = CrepesConformalPredictor(
+                model,
+                method=conformal_method,
+            )
+        else:
+            raise ValueError(
+                "Either 'model' or 'conformal_predictor' "
+                "must be provided."
+            )
 
         self.explainer = explainer or ShapUncertaintyExplainer(
             cp=self.cp,
@@ -215,15 +224,13 @@ class UncertaintyExplanationPipeline:
 
         # Rebuild explainer only if algorithm changed
         if self._explainer_algorithm != algorithm:
-            self.explainer.build_explainer(
+            self.explainer.fit(
                 self._X_background,
                 algorithm,
             )
             self._explainer_algorithm = algorithm
 
-        shap_values = (
-            self.explainer.compute_shap_values(X)
-        )
+        shap_values = self.explainer.explain(X)
 
         if self._feature_names is not None:
             shap_values.feature_names = self._feature_names

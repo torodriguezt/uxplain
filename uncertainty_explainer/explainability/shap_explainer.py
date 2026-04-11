@@ -41,15 +41,15 @@ class ShapUncertaintyExplainer:
         self.confidence = confidence
         self.algorithm = algorithm
 
-        self.explainer: shap.Explainer | None = None
+        self._shap_explainer: shap.Explainer | None = None
 
-    def build_explainer(
+    def fit(
         self,
         X_background: np.ndarray,
         algorithm: str | None = None,
     ) -> None:
         """
-        Build SHAP explainer.
+        Build SHAP explainer from background data.
         """
 
         width_function = (
@@ -59,25 +59,23 @@ class ShapUncertaintyExplainer:
             )
         )
 
-        self.explainer = shap.Explainer(
+        self._shap_explainer = shap.Explainer(
             width_function,
             X_background,
             algorithm=algorithm or self.algorithm,
         )
 
-    def compute_shap_values(
+    def explain(
         self,
         X: np.ndarray,
     ) -> shap.Explanation:
         """
-        Compute SHAP values.
+        Compute SHAP values for X.
         """
 
-        if self.explainer is None:
+        if self._shap_explainer is None:
             raise RuntimeError(
-                "Explainer not built."
+                "Explainer not fitted. Call fit() first."
             )
 
-        shap_values = self.explainer(X)
-
-        return shap_values
+        return self._shap_explainer(X)
