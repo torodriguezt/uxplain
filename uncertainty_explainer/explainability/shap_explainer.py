@@ -23,6 +23,7 @@ class ShapUncertaintyExplainer:
         cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
         algorithm: str = "auto",
+        feature_names: list[str] | None = None,
     ):
         """
         Initialize SHAP explainer.
@@ -35,11 +36,15 @@ class ShapUncertaintyExplainer:
         confidence : float
 
         algorithm : str
+
+        feature_names : list of str, optional
+            Feature names for SHAP explanation output.
         """
 
         self.cp = cp
         self.confidence = confidence
         self.algorithm = algorithm
+        self.feature_names = feature_names
 
         self._shap_explainer: shap.Explainer | None = None
 
@@ -78,4 +83,9 @@ class ShapUncertaintyExplainer:
                 "Explainer not fitted. Call fit() first."
             )
 
-        return self._shap_explainer(X)
+        explanation = self._shap_explainer(X)
+
+        if self.feature_names is not None:
+            explanation.feature_names = self.feature_names
+
+        return explanation
