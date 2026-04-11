@@ -10,6 +10,7 @@ from .conformal.predictor import ConformalMethod, ConformalPredictor
 from .explainability.explainer import (
     UncertaintyShapExplainer,
 )
+from .plots import generate_default_plots
 
 
 class UncertaintyExplanationPipeline:
@@ -62,9 +63,19 @@ class UncertaintyExplanationPipeline:
         y_train,
         X_calib,
         y_calib,
+        X_background=None,
+        algorithm="auto",
     ):
         """
-        Fit conformal predictor.
+        Fit conformal predictor and build SHAP explainer.
+
+        Parameters
+        ----------
+        X_background : np.ndarray, optional
+            Background data for SHAP explainer. Defaults to X_calib.
+
+        algorithm : str
+            SHAP algorithm to use.
         """
 
         self.cp.fit(
@@ -74,25 +85,22 @@ class UncertaintyExplanationPipeline:
             y_calib,
         )
 
+        if X_background is None:
+            X_background = X_calib
+
+        self.shap_explainer.build_explainer(
+            X_background,
+            algorithm,
+        )
+
     def explain_uncertainty(
         self,
         X,
-        X_background=None,
-        algorithm = "auto",
-        generate_plots=True,
+        show_plots=True,
     ):
         """
         Explain interval width uncertainty.
         """
-
-        if X_background is None:
-            X_background = X[:100]
-
-        # TODO: Move build_explainer to fit() to avoid rebuilding on every call
-        self.shap_explainer.build_explainer(
-            X_background,
-            algorithm
-        )
 
         shap_values = (
             self.shap_explainer.compute_shap_values(
@@ -106,39 +114,8 @@ class UncertaintyExplanationPipeline:
 
         width = upper - lower
 
-        if generate_plots:
-
-            import matplotlib.pyplot as plt
-            import shap
-
-            plt.rcParams.update({
-                "font.family": "sans-serif",
-                "font.size": 12,
-                "axes.labelsize": 13,
-                "axes.titlesize": 14,
-                "axes.titleweight": "bold",
-                "xtick.labelsize": 11,
-                "ytick.labelsize": 11,
-                "figure.facecolor": "white",
-                "axes.facecolor": "#fafafa",
-                "axes.edgecolor": "#cccccc",
-                "axes.linewidth": 0.8,
-            })
-
-            shap.plots.beeswarm(shap_values, show=False)
-            plt.gcf().set_size_inches(10, 6)
-            plt.tight_layout()
-            plt.show()
-
-            shap.plots.bar(shap_values, show=False)
-            plt.gcf().set_size_inches(10, 5)
-            plt.tight_layout()
-            plt.show()
-
-            shap.plots.waterfall(shap_values[0], show=False)
-            plt.gcf().set_size_inches(10, 5)
-            plt.tight_layout()
-            plt.show()
+        if show_plots:
+            generate_default_plots(shap_values, X)
 
         return {
             "lower": lower,
