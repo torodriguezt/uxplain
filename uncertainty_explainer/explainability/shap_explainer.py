@@ -7,20 +7,20 @@ from __future__ import annotations
 import numpy as np
 import shap
 
-from ..conformal.predictor import ConformalPredictor
+from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import (
     make_interval_width_function,
 )
 
 
-class UncertaintyShapExplainer:
+class ShapUncertaintyExplainer:
     """
     SHAP-based explainer for uncertainty metrics.
     """
 
     def __init__(
         self,
-        cp: ConformalPredictor,
+        cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
         algorithm: str = "auto",
     ):

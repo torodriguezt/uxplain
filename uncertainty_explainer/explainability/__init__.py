@@ -1,3 +1,5 @@
-from uncertainty_explainer.explainability.explainer import UncertaintyShapExplainer
+from uncertainty_explainer.explainability.shap_explainer import (
+    ShapUncertaintyExplainer,
+)
 
-__all__ = ["UncertaintyShapExplainer"]
+__all__ = ["ShapUncertaintyExplainer"]
