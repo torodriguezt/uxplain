@@ -140,7 +140,7 @@ class UncertaintyExplanationPipeline:
 
         return self.cp.predict(
             X,
-            confidence=confidence or self.confidence,
+            confidence=self.confidence if confidence is None else confidence,
         )
 
     def explain_uncertainty(
