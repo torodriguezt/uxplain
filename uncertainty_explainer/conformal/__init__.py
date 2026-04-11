@@ -1,3 +1,5 @@
-from uncertainty_explainer.conformal.predictor import ConformalPredictor
+from uncertainty_explainer.conformal.crepes_predictor import (
+    CrepesConformalPredictor,
+)
 
-__all__ = ["ConformalPredictor"]
+__all__ = ["CrepesConformalPredictor"]

@@ -24,7 +24,7 @@ ConformalMethod = Literal[
 ]
 
 
-class ConformalPredictor:
+class CrepesConformalPredictor:
     """
     Wrapper for conformal regression using crepes.
 
@@ -121,7 +121,7 @@ class ConformalPredictor:
         """
 
         if self.wrapper is None:
-            raise RuntimeError("ConformalPredictor not fitted.")
+            raise RuntimeError("CrepesConformalPredictor not fitted.")
 
         intervals = self.wrapper.predict_int(
             X,
