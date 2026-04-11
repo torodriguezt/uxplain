@@ -37,7 +37,7 @@ class UncertaintyExplainerProtocol(Protocol):
     def fit(
         self,
         X_background: np.ndarray,
-        algorithm: str | None = None,
+        **kwargs,
     ) -> None: ...
 
     def explain(
