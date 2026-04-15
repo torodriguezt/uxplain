@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -16,13 +16,17 @@ from .conformal.crepes_predictor import (
     CrepesConformalPredictor,
 )
 from .explainability.shap_explainer import ShapUncertaintyExplainer
-from .plots import generate_default_plots
+from .explainability.pdp_explainer import PDPUncertaintyExplainer
+from .plots import generate_default_plots, generate_pdp_plots
 from .protocols import (
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
 
+XAIMethod = Literal["shap", "pdp"]
+
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
+VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance")
 
 
 @dataclass
@@ -49,11 +53,12 @@ class ExplanationResult:
 
 class UncertaintyExplanationPipeline:
     """
-    Pipeline integrating:
+    Pipeline integrating conformal prediction and uncertainty explanation.
 
-    - Conformal prediction
-    - Uncertainty metrics
-    - SHAP explanations
+    Supports two XAI methods selectable via ``xai_method``:
+
+    - ``"shap"`` — SHAP-based explanation (default)
+    - ``"pdp"``  — Partial Dependence Plot explanation
     """
 
     def __init__(
@@ -61,6 +66,7 @@ class UncertaintyExplanationPipeline:
         model=None,
         confidence: float = 0.9,
         conformal_method: ConformalMethod = "normalized",
+        xai_method: XAIMethod = "shap",
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -77,19 +83,25 @@ class UncertaintyExplanationPipeline:
         confidence : float
 
         conformal_method : ConformalMethod
-            Conformal prediction method to use.
-            Ignored if conformal_predictor is provided.
+            Conformal prediction method. One of ``"standard"``,
+            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``.
+            Ignored if ``conformal_predictor`` is provided.
+
+        xai_method : {"shap", "pdp"}
+            Explainability method to use. Ignored if ``explainer``
+            is provided.
 
         conformal_predictor : ConformalPredictorProtocol, optional
             Custom conformal predictor. If not provided,
-            defaults to CrepesConformalPredictor(model).
+            defaults to ``CrepesConformalPredictor(model)``.
 
         explainer : UncertaintyExplainerProtocol, optional
-            Custom uncertainty explainer. If not provided,
-            defaults to ShapUncertaintyExplainer.
+            Custom explainer instance. Overrides ``xai_method``
+            when provided.
         """
 
         self.confidence = confidence
+        self.xai_method = xai_method
 
         if conformal_predictor is not None:
             self.cp = conformal_predictor
@@ -104,10 +116,23 @@ class UncertaintyExplanationPipeline:
                 "must be provided."
             )
 
-        self.explainer = explainer or ShapUncertaintyExplainer(
-            cp=self.cp,
-            confidence=self.confidence,
-        )
+        if explainer is not None:
+            self.explainer = explainer
+        elif xai_method == "pdp":
+            self.explainer = PDPUncertaintyExplainer(
+                cp=self.cp,
+                confidence=self.confidence,
+            )
+        elif xai_method == "shap":
+            self.explainer = ShapUncertaintyExplainer(
+                cp=self.cp,
+                confidence=self.confidence,
+            )
+        else:
+            raise ValueError(
+                f"Unknown xai_method '{xai_method}'. "
+                "Choose from 'shap' or 'pdp'."
+            )
 
         self._is_fitted = False
         self._explainer_kwargs = None
@@ -213,13 +238,16 @@ class UncertaintyExplanationPipeline:
         show_plots : bool
             Whether to display plots.
         plot_kind : str or list of str, optional
-            Which plots to show. Options: "beeswarm", "bar",
-            "waterfall", "summary". Defaults to all.
+            For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
+            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
+            Defaults to all valid kinds for the active method.
         waterfall_index : int
-            Sample index for waterfall plot.
+            Sample index for SHAP waterfall plot.
         **explainer_kwargs
-            Passed to explainer.fit(). For the default SHAP
-            explainer: algorithm="auto", "permutation", etc.
+            Passed to explainer.fit().
+            For SHAP: ``algorithm="auto"|"permutation"|...``
+            For PDP:  ``kind="average"|"individual"|"both"``,
+            ``grid_resolution``, ``percentiles``, ``features``.
         """
 
         self._check_is_fitted()
@@ -241,12 +269,10 @@ class UncertaintyExplanationPipeline:
         width = upper - lower
 
         if show_plots:
-            kinds = self._resolve_plot_kinds(plot_kind)
-            generate_default_plots(
+            self.plot(
                 explanation_values,
-                X,
-                kinds=kinds,
-                feature_names=self._feature_names,
+                X=X,
+                kind=plot_kind,
                 waterfall_index=waterfall_index,
             )
 
@@ -261,29 +287,42 @@ class UncertaintyExplanationPipeline:
         self,
         explanation_values,
         X=None,
-        kind: str | list[str] = "beeswarm",
+        kind: str | list[str] | None = None,
         waterfall_index: int = 0,
     ):
         """
-        Generate specific plot(s) from existing results.
+        Generate plot(s) from existing explanation results.
 
         Parameters
         ----------
         explanation_values
-            Explanation values from explain_uncertainty().
+            Output of ``explain_uncertainty().explanation_values``.
         X : np.ndarray, optional
-        kind : str or list of str
+            Required for SHAP ``"summary"`` plot.
+        kind : str or list of str, optional
+            For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
+            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
+            Defaults to all valid kinds for the active explainer.
         waterfall_index : int
+            Sample index for SHAP waterfall plot.
         """
 
         kinds = self._resolve_plot_kinds(kind)
-        generate_default_plots(
-            explanation_values,
-            X,
-            kinds=kinds,
-            feature_names=self._feature_names,
-            waterfall_index=waterfall_index,
-        )
+
+        if isinstance(self.explainer, PDPUncertaintyExplainer):
+            generate_pdp_plots(
+                explanation_values,
+                kinds=kinds,
+                feature_names=self._feature_names,
+            )
+        else:
+            generate_default_plots(
+                explanation_values,
+                X,
+                kinds=kinds,
+                feature_names=self._feature_names,
+                waterfall_index=waterfall_index,
+            )
 
     def _check_is_fitted(self):
         if not self._is_fitted:
@@ -298,18 +337,24 @@ class UncertaintyExplanationPipeline:
                 f"X must be 2D, got shape {X_arr.shape}"
             )
 
-    @staticmethod
     def _resolve_plot_kinds(
+        self,
         kind: str | list[str] | None,
     ) -> list[str]:
+        valid = (
+            VALID_PDP_PLOT_KINDS
+            if isinstance(self.explainer, PDPUncertaintyExplainer)
+            else VALID_PLOT_KINDS
+        )
         if kind is None:
-            return list(VALID_PLOT_KINDS)
+            # return list(valid)
+            return kind
         if isinstance(kind, str):
             kind = [kind]
         for k in kind:
-            if k not in VALID_PLOT_KINDS:
+            if k not in valid:
                 raise ValueError(
                     f"Unknown plot kind '{k}'. "
-                    f"Choose from {VALID_PLOT_KINDS}"
+                    f"Choose from {valid}"
                 )
         return kind
