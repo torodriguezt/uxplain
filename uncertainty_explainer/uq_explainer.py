@@ -57,10 +57,11 @@ class UncertaintyExplanationPipeline:
     """
     Pipeline integrating conformal prediction and uncertainty explanation.
 
-    Supports two XAI methods selectable via ``xai_method``:
+    Supports three XAI methods selectable via ``xai_method``:
 
     - ``"shap"`` — SHAP-based explanation (default)
     - ``"pdp"``  — Partial Dependence Plot explanation
+    - ``"lime"`` — LIME-based explanation (local or global)
     """
 
     def __init__(
@@ -70,6 +71,7 @@ class UncertaintyExplanationPipeline:
         conformal_method: ConformalMethod = "normalized",
         xai_method: XAIMethod = "shap",
         lime_scope: Literal["local", "global"] = "local",
+        n_lime_samples: int = 5000,
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -97,6 +99,11 @@ class UncertaintyExplanationPipeline:
         lime_scope : {"local", "global"}
             Scope for the LIME explainer when ``xai_method="lime"``.
             Ignored otherwise.
+
+        n_lime_samples : int
+            Number of perturbations per sample used by LIME.
+            Higher values give more stable coefficients at the cost
+            of speed. Ignored when ``xai_method != "lime"``.
 
         conformal_predictor : ConformalPredictorProtocol, optional
             Custom conformal predictor. If not provided,
@@ -140,6 +147,7 @@ class UncertaintyExplanationPipeline:
                 cp=self.cp,
                 confidence=self.confidence,
                 scope=lime_scope,
+                n_lime_samples=n_lime_samples,
             )
         else:
             raise ValueError(
@@ -176,7 +184,7 @@ class UncertaintyExplanationPipeline:
             Fraction of X_train to use for calibration
             when X_calib is not provided.
         X_background : np.ndarray, optional
-            Background data for SHAP explainer.
+            Background data for the explainer (SHAP, PDP, or LIME).
             Defaults to X_calib.
         """
 
@@ -253,7 +261,8 @@ class UncertaintyExplanationPipeline:
         plot_kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
             For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
-            Defaults to all valid kinds for the active method.
+            For LIME: ``"local"``, ``"global"``.
+            Defaults to method-specific defaults when ``None``.
         waterfall_index : int
             Sample index for SHAP waterfall plot.
         **explainer_kwargs
@@ -315,7 +324,8 @@ class UncertaintyExplanationPipeline:
         kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
             For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
-            Defaults to all valid kinds for the active explainer.
+            For LIME: ``"local"``, ``"global"``.
+            Defaults to method-specific defaults when ``None``.
         waterfall_index : int
             Sample index for SHAP waterfall plot.
         """
@@ -367,8 +377,7 @@ class UncertaintyExplanationPipeline:
         else:
             valid = VALID_PLOT_KINDS
         if kind is None:
-            # return list(valid)
-            return kind
+            return None  # each plot function applies its own defaults
         if isinstance(kind, str):
             kind = [kind]
         for k in kind:
