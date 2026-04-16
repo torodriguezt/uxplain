@@ -96,6 +96,86 @@ def generate_default_plots(
     return figures
 
 
+def generate_lime_plots(
+    explanation,
+    kinds: List[str] | None = None,
+    sample_index: int = 0,
+    show: bool = True,
+) -> dict:
+    """
+    Generate LIME plots from a ``LIMEExplanation`` object.
+
+    Parameters
+    ----------
+    explanation : LIMEExplanation
+        Output of ``LimeUncertaintyExplainer.explain()``.
+
+    kinds : list of str, optional
+        Which plots to generate. Options:
+
+        - ``"local"``  — LIME coefficients for a single sample
+        - ``"global"`` — mean absolute importance across all samples
+
+        Defaults to ``["local"]`` when ``explanation.scope == "local"``
+        and ``["local", "global"]`` when ``scope == "global"``.
+
+    sample_index : int
+        Sample row to highlight in the ``"local"`` plot.
+
+    show : bool
+        Whether to call ``plt.show()``.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping plot kind to matplotlib figure.
+    """
+
+    if kinds is None:
+        kinds = ["local", "global"] if explanation.scope == "global" else ["local"]
+
+    fnames = explanation.feature_names
+    n = len(fnames)
+    figures = {}
+
+    # --- Local ---
+    if "local" in kinds:
+        coefs = explanation.local_coefficients[sample_index]
+        order = np.argsort(np.abs(coefs))
+        labels = [fnames[i] for i in order]
+        colors = ["steelblue" if c >= 0 else "tomato" for c in coefs[order]]
+
+        fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
+        bars = ax.barh(labels, coefs[order], color=colors)
+        ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
+        ax.axvline(0, color="black", linewidth=0.8)
+        ax.set_xlabel("LIME coefficient (effect on interval width)")
+        ax.set_title(f"LIME — Local explanation (sample {sample_index})")
+        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+        fig.tight_layout()
+        figures["local"] = fig
+
+    # --- Global ---
+    if "global" in kinds:
+        importance = explanation.global_importance
+        order = np.argsort(importance)
+        labels = [fnames[i] for i in order]
+
+        fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
+        bars = ax.barh(labels, importance[order], color="steelblue")
+        ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
+        ax.set_xlabel(r"Mean $|\text{LIME coefficient}|$ (effect on interval width)")
+        ax.set_title("LIME — Global feature importance")
+        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+        fig.tight_layout()
+        figures["global"] = fig
+
+    if show:
+        plt.show()
+
+    return figures
+
+
 def generate_pdp_plots(
     explanation,
     kinds: List[str] | None = None,
