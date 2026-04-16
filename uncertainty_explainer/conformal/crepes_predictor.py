@@ -123,9 +123,16 @@ class CrepesConformalPredictor:
         if self.wrapper is None:
             raise RuntimeError("CrepesConformalPredictor not fitted.")
 
+        predict_kwargs = {}
+        if self.difficulty_estimator is not None:
+            predict_kwargs["de"] = self.difficulty_estimator
+        if self.mondrian_categorizer is not None:
+            predict_kwargs["mc"] = self.mondrian_categorizer
+
         intervals = self.wrapper.predict_int(
             X,
             confidence=confidence,
+            **predict_kwargs,
         )
 
         lower = intervals[:, 0]
