@@ -17,16 +17,18 @@ from .conformal.crepes_predictor import (
 )
 from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .explainability.pdp_explainer import PDPUncertaintyExplainer
-from .plots import generate_default_plots, generate_pdp_plots
+from .explainability.lime_explainer import LimeUncertaintyExplainer
+from .plots import generate_default_plots, generate_pdp_plots, generate_lime_plots
 from .protocols import (
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
 
-XAIMethod = Literal["shap", "pdp"]
+XAIMethod = Literal["shap", "pdp", "lime"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
 VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance")
+VALID_LIME_PLOT_KINDS = ("local", "global")
 
 
 @dataclass
@@ -67,6 +69,7 @@ class UncertaintyExplanationPipeline:
         confidence: float = 0.9,
         conformal_method: ConformalMethod = "normalized",
         xai_method: XAIMethod = "shap",
+        lime_scope: Literal["local", "global"] = "local",
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -87,9 +90,13 @@ class UncertaintyExplanationPipeline:
             ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``.
             Ignored if ``conformal_predictor`` is provided.
 
-        xai_method : {"shap", "pdp"}
+        xai_method : {"shap", "pdp", "lime"}
             Explainability method to use. Ignored if ``explainer``
             is provided.
+
+        lime_scope : {"local", "global"}
+            Scope for the LIME explainer when ``xai_method="lime"``.
+            Ignored otherwise.
 
         conformal_predictor : ConformalPredictorProtocol, optional
             Custom conformal predictor. If not provided,
@@ -128,10 +135,16 @@ class UncertaintyExplanationPipeline:
                 cp=self.cp,
                 confidence=self.confidence,
             )
+        elif xai_method == "lime":
+            self.explainer = LimeUncertaintyExplainer(
+                cp=self.cp,
+                confidence=self.confidence,
+                scope=lime_scope,
+            )
         else:
             raise ValueError(
                 f"Unknown xai_method '{xai_method}'. "
-                "Choose from 'shap' or 'pdp'."
+                "Choose from 'shap', 'pdp', or 'lime'."
             )
 
         self._is_fitted = False
@@ -315,6 +328,12 @@ class UncertaintyExplanationPipeline:
                 kinds=kinds,
                 feature_names=self._feature_names,
             )
+        elif isinstance(self.explainer, LimeUncertaintyExplainer):
+            generate_lime_plots(
+                explanation_values,
+                kinds=kinds,
+                sample_index=waterfall_index,
+            )
         else:
             generate_default_plots(
                 explanation_values,
@@ -341,11 +360,12 @@ class UncertaintyExplanationPipeline:
         self,
         kind: str | list[str] | None,
     ) -> list[str]:
-        valid = (
-            VALID_PDP_PLOT_KINDS
-            if isinstance(self.explainer, PDPUncertaintyExplainer)
-            else VALID_PLOT_KINDS
-        )
+        if isinstance(self.explainer, PDPUncertaintyExplainer):
+            valid = VALID_PDP_PLOT_KINDS
+        elif isinstance(self.explainer, LimeUncertaintyExplainer):
+            valid = VALID_LIME_PLOT_KINDS
+        else:
+            valid = VALID_PLOT_KINDS
         if kind is None:
             # return list(valid)
             return kind
