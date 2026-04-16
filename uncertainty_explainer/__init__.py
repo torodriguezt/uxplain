@@ -1,5 +1,9 @@
-from uncertainty_explainer import config  # noqa: F401
 from uncertainty_explainer.conformal.crepes_predictor import CrepesConformalPredictor
+from uncertainty_explainer.conformal.cqr_predictor import CQRConformalPredictor
+from uncertainty_explainer.explainability.lime_explainer import (
+    LIMEExplanation,
+    LimeUncertaintyExplainer,
+)
 from uncertainty_explainer.explainability.shap_explainer import ShapUncertaintyExplainer
 from uncertainty_explainer.protocols import (
     ConformalPredictorProtocol,
@@ -12,8 +16,11 @@ from uncertainty_explainer.uq_explainer import (
 
 __all__ = [
     "ConformalPredictorProtocol",
+    "CQRConformalPredictor",
     "CrepesConformalPredictor",
     "ExplanationResult",
+    "LIMEExplanation",
+    "LimeUncertaintyExplainer",
     "ShapUncertaintyExplainer",
     "UncertaintyExplainerProtocol",
     "UncertaintyExplanationPipeline",
