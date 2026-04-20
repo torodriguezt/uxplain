@@ -71,6 +71,7 @@ class LimeUncertaintyExplainer:
         scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
         feature_names: Optional[List[str]] = None,
+        random_state: int | None = None,
     ):
         """
         Parameters
@@ -90,6 +91,10 @@ class LimeUncertaintyExplainer:
 
         feature_names : list of str, optional
             Feature names for axis labels.
+
+        random_state : int, optional
+            Seed for LIME's perturbation sampling. Set for
+            reproducible coefficients across runs.
         """
 
         self.cp = cp
@@ -97,6 +102,7 @@ class LimeUncertaintyExplainer:
         self.scope = scope
         self.n_lime_samples = n_lime_samples
         self.feature_names = feature_names
+        self.random_state = random_state
 
         self._lime_explainer: LimeTabularExplainer | None = None
         self._width_fn = None
@@ -126,6 +132,7 @@ class LimeUncertaintyExplainer:
             X_background,
             feature_names=fnames,
             mode="regression",
+            random_state=self.random_state,
         )
         self._width_fn = make_interval_width_function(self.cp, self.confidence)
 

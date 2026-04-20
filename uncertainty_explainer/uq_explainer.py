@@ -33,7 +33,7 @@ VALID_LIME_PLOT_KINDS = ("local", "global")
 
 @dataclass
 class ExplanationResult:
-    """Result of explain_uncertainty().
+    """Result of explain().
 
     Attributes
     ----------
@@ -72,6 +72,7 @@ class UncertaintyExplanationPipeline:
         xai_method: XAIMethod = "shap",
         lime_scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
+        random_state: int | None = None,
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -105,6 +106,11 @@ class UncertaintyExplanationPipeline:
             Higher values give more stable coefficients at the cost
             of speed. Ignored when ``xai_method != "lime"``.
 
+        random_state : int, optional
+            Seed used for stochastic steps: the auto calibration
+            split in ``fit()`` and, when ``xai_method="lime"``, the
+            LIME perturbation sampler.
+
         conformal_predictor : ConformalPredictorProtocol, optional
             Custom conformal predictor. If not provided,
             defaults to ``CrepesConformalPredictor(model)``.
@@ -116,6 +122,7 @@ class UncertaintyExplanationPipeline:
 
         self.confidence = confidence
         self.xai_method = xai_method
+        self.random_state = random_state
 
         if conformal_predictor is not None:
             self.cp = conformal_predictor
@@ -148,6 +155,7 @@ class UncertaintyExplanationPipeline:
                 confidence=self.confidence,
                 scope=lime_scope,
                 n_lime_samples=n_lime_samples,
+                random_state=random_state,
             )
         else:
             raise ValueError(
@@ -167,6 +175,7 @@ class UncertaintyExplanationPipeline:
         y_calib=None,
         calib_size: float = 0.2,
         X_background=None,
+        random_state: int | None = None,
     ):
         """
         Fit conformal predictor.
@@ -186,6 +195,9 @@ class UncertaintyExplanationPipeline:
         X_background : np.ndarray, optional
             Background data for the explainer (SHAP, PDP, or LIME).
             Defaults to X_calib.
+        random_state : int, optional
+            Seed for the auto calibration split. Overrides the
+            pipeline-level ``random_state`` for this call only.
         """
 
         # Extract feature names from DataFrame
@@ -196,9 +208,19 @@ class UncertaintyExplanationPipeline:
 
         # Auto-split if calibration set not provided
         if X_calib is None or y_calib is None:
+            seed = random_state if random_state is not None else self.random_state
             X_train, X_calib, y_train, y_calib = train_test_split(
                 X_train, y_train, test_size=calib_size,
+                random_state=seed,
             )
+
+        # Strip feature names before fitting. SHAP/LIME later call predict()
+        # with numpy arrays; sklearn emits a warning on every such call when
+        # the estimator was fitted with a DataFrame.
+        X_train = np.asarray(X_train)
+        X_calib = np.asarray(X_calib)
+        y_train = np.asarray(y_train)
+        y_calib = np.asarray(y_calib)
 
         self.cp.fit(
             X_train,
@@ -208,7 +230,7 @@ class UncertaintyExplanationPipeline:
         )
 
         self._X_background = (
-            X_background if X_background is not None
+            np.asarray(X_background) if X_background is not None
             else X_calib
         )
         self._is_fitted = True
@@ -238,11 +260,11 @@ class UncertaintyExplanationPipeline:
         self._check_X(X)
 
         return self.cp.predict(
-            X,
+            np.asarray(X),
             confidence=self.confidence if confidence is None else confidence,
         )
 
-    def explain_uncertainty(
+    def explain(
         self,
         X,
         show_plots: bool = True,
@@ -274,6 +296,7 @@ class UncertaintyExplanationPipeline:
 
         self._check_is_fitted()
         self._check_X(X)
+        X = np.asarray(X)
 
         # Rebuild explainer if kwargs changed
         if self._explainer_kwargs != explainer_kwargs:
@@ -305,6 +328,8 @@ class UncertaintyExplanationPipeline:
             explanation_values=explanation_values,
         )
 
+    explain_uncertainty = explain
+
     def plot(
         self,
         explanation_values,
@@ -318,7 +343,7 @@ class UncertaintyExplanationPipeline:
         Parameters
         ----------
         explanation_values
-            Output of ``explain_uncertainty().explanation_values``.
+            Output of ``explain().explanation_values``.
         X : np.ndarray, optional
             Required for SHAP ``"summary"`` plot.
         kind : str or list of str, optional
