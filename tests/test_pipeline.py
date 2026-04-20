@@ -103,21 +103,21 @@ class TestFitPredict:
 
 
 # ---------------------------------------------------------------------------
-# explain_uncertainty — SHAP
+# explain — SHAP
 # ---------------------------------------------------------------------------
 
 class TestExplainShap:
     def test_returns_explanation_result(self, data):
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:5], show_plots=False)
+        result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert isinstance(result, ExplanationResult)
 
     def test_shap_result_shapes(self, data):
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
         X_small = data["X_test"][:5]
-        result = pipeline.explain_uncertainty(X_small, show_plots=False)
+        result = pipeline.explain(X_small, show_plots=False)
         n = len(X_small)
         assert result.lower.shape == (n,)
         assert result.upper.shape == (n,)
@@ -127,17 +127,17 @@ class TestExplainShap:
     def test_shap_explanation_values_type(self, data):
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:5], show_plots=False)
+        result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert isinstance(result.explanation_values, shap.Explanation)
 
     def test_shap_explainer_rebuilt_on_kwarg_change(self, data):
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
         X_small = data["X_test"][:5]
-        pipeline.explain_uncertainty(X_small, show_plots=False)
+        pipeline.explain(X_small, show_plots=False)
         old_id = id(pipeline.explainer._shap_explainer)
         # Changing algorithm kwarg should trigger a rebuild
-        pipeline.explain_uncertainty(X_small, show_plots=False, algorithm="permutation")
+        pipeline.explain(X_small, show_plots=False, algorithm="permutation")
         new_id = id(pipeline.explainer._shap_explainer)
         assert old_id != new_id
 
@@ -145,33 +145,33 @@ class TestExplainShap:
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError, match="Unknown plot kind"):
-            pipeline.explain_uncertainty(
+            pipeline.explain(
                 data["X_test"][:3], show_plots=False, plot_kind="invalid"
             )
 
 
 # ---------------------------------------------------------------------------
-# explain_uncertainty — PDP
+# explain — PDP
 # ---------------------------------------------------------------------------
 
 class TestExplainPDP:
     def test_returns_explanation_result(self, data):
         pipeline = _make_pipeline(xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:5], show_plots=False)
+        result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert isinstance(result, ExplanationResult)
 
     def test_pdp_explanation_values_type(self, data):
         pipeline = _make_pipeline(xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:5], show_plots=False)
+        result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert isinstance(result.explanation_values, PDPExplanation)
 
     def test_pdp_values_shape(self, data):
         n_features = data["X_test"].shape[1]
         pipeline = _make_pipeline(xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:5], show_plots=False)
+        result = pipeline.explain(data["X_test"][:5], show_plots=False)
         exp = result.explanation_values
         assert exp.values.shape[0] == n_features
 
@@ -179,33 +179,33 @@ class TestExplainPDP:
         pipeline = _make_pipeline(xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError, match="Unknown plot kind"):
-            pipeline.explain_uncertainty(
+            pipeline.explain(
                 data["X_test"][:3], show_plots=False, plot_kind="beeswarm"
             )
 
 
 # ---------------------------------------------------------------------------
-# explain_uncertainty — LIME
+# explain — LIME
 # ---------------------------------------------------------------------------
 
 class TestExplainLIME:
     def test_local_returns_explanation_result(self, data):
         pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:3], show_plots=False)
+        result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert isinstance(result, ExplanationResult)
 
     def test_local_explanation_values_type(self, data):
         pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:3], show_plots=False)
+        result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert isinstance(result.explanation_values, LIMEExplanation)
         assert result.explanation_values.scope == "local"
 
     def test_global_scope(self, data):
         pipeline = _make_pipeline(xai_method="lime", lime_scope="global", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:3], show_plots=False)
+        result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert result.explanation_values.scope == "global"
 
     def test_local_coefficients_shape(self, data):
@@ -213,7 +213,7 @@ class TestExplainLIME:
         X_small = data["X_test"][:3]
         pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(X_small, show_plots=False)
+        result = pipeline.explain(X_small, show_plots=False)
         exp = result.explanation_values
         assert exp.local_coefficients.shape == (len(X_small), n_features)
         assert exp.global_importance.shape == (n_features,)
@@ -221,7 +221,7 @@ class TestExplainLIME:
     def test_global_importance_is_mean_abs_local(self, data):
         pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:3], show_plots=False)
+        result = pipeline.explain(data["X_test"][:3], show_plots=False)
         exp = result.explanation_values
         expected = np.mean(np.abs(exp.local_coefficients), axis=0)
         np.testing.assert_allclose(exp.global_importance, expected)
@@ -231,13 +231,13 @@ class TestExplainLIME:
         X_df = pd.DataFrame(data["X_train"], columns=cols)
         pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
         pipeline.fit(X_df, data["y_train"])
-        result = pipeline.explain_uncertainty(data["X_test"][:2], show_plots=False)
+        result = pipeline.explain(data["X_test"][:2], show_plots=False)
         assert result.explanation_values.feature_names == cols
 
     def test_invalid_plot_kind_raises(self, data):
         pipeline = _make_pipeline(xai_method="lime", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError, match="Unknown plot kind"):
-            pipeline.explain_uncertainty(
+            pipeline.explain(
                 data["X_test"][:2], show_plots=False, plot_kind="beeswarm"
             )
