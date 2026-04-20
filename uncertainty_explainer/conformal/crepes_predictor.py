@@ -123,16 +123,11 @@ class CrepesConformalPredictor:
         if self.wrapper is None:
             raise RuntimeError("CrepesConformalPredictor not fitted.")
 
-        predict_kwargs = {}
-        if self.difficulty_estimator is not None:
-            predict_kwargs["de"] = self.difficulty_estimator
-        if self.mondrian_categorizer is not None:
-            predict_kwargs["mc"] = self.mondrian_categorizer
-
+        # crepes stores de/mc on the wrapper at calibrate() time and
+        # applies them internally during predict_int().
         intervals = self.wrapper.predict_int(
             X,
             confidence=confidence,
-            **predict_kwargs,
         )
 
         lower = intervals[:, 0]
