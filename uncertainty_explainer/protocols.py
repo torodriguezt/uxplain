@@ -2,7 +2,7 @@
 Protocols defining the interfaces for conformal
 prediction and uncertainty explanation.
 
-Concrete implementations (e.g. crepes, MAPIE, shap, LIME)
+Concrete implementations (e.g. crepes, shap, LIME)
 must satisfy these interfaces to be used in the pipeline.
 """
 
