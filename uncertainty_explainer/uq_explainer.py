@@ -15,6 +15,7 @@ from .conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )
+from .conformal.cqr_predictor import CQRConformalPredictor
 from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.lime_explainer import LimeUncertaintyExplainer
@@ -68,10 +69,12 @@ class UncertaintyExplanationPipeline:
         self,
         model=None,
         confidence: float = 0.9,
-        conformal_method: ConformalMethod = "normalized",
+        conformal_method: ConformalMethod | Literal["cqr"] = "normalized",
         xai_method: XAIMethod = "shap",
         lime_scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
+        lower_model=None,
+        upper_model=None,
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -81,15 +84,16 @@ class UncertaintyExplanationPipeline:
         Parameters
         ----------
         model
-            sklearn-compatible regressor. Required when using
-            the default CrepesConformalPredictor. Can be omitted
-            if a custom conformal_predictor is provided.
+            sklearn-compatible regressor. Required for crepes methods.
+            Ignored when ``conformal_method="cqr"`` or when a custom
+            ``conformal_predictor`` is provided.
 
         confidence : float
 
-        conformal_method : ConformalMethod
+        conformal_method : str
             Conformal prediction method. One of ``"standard"``,
-            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``.
+            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``
+            (crepes-based), or ``"cqr"`` (Conformalized Quantile Regression).
             Ignored if ``conformal_predictor`` is provided.
 
         xai_method : {"shap", "pdp", "lime"}
@@ -105,9 +109,19 @@ class UncertaintyExplanationPipeline:
             Higher values give more stable coefficients at the cost
             of speed. Ignored when ``xai_method != "lime"``.
 
+        lower_model
+            Quantile regressor for the lower bound, e.g.
+            ``GradientBoostingRegressor(loss="quantile", alpha=0.05)``.
+            Required when ``conformal_method="cqr"``.
+
+        upper_model
+            Quantile regressor for the upper bound, e.g.
+            ``GradientBoostingRegressor(loss="quantile", alpha=0.95)``.
+            Required when ``conformal_method="cqr"``.
+
         conformal_predictor : ConformalPredictorProtocol, optional
-            Custom conformal predictor. If not provided,
-            defaults to ``CrepesConformalPredictor(model)``.
+            Custom conformal predictor. Overrides ``conformal_method``
+            when provided.
 
         explainer : UncertaintyExplainerProtocol, optional
             Custom explainer instance. Overrides ``xai_method``
@@ -119,6 +133,13 @@ class UncertaintyExplanationPipeline:
 
         if conformal_predictor is not None:
             self.cp = conformal_predictor
+        elif conformal_method == "cqr":
+            if lower_model is None or upper_model is None:
+                raise ValueError(
+                    "conformal_method='cqr' requires both 'lower_model' "
+                    "and 'upper_model'."
+                )
+            self.cp = CQRConformalPredictor(lower_model, upper_model)
         elif model is not None:
             self.cp = CrepesConformalPredictor(
                 model,
@@ -126,8 +147,8 @@ class UncertaintyExplanationPipeline:
             )
         else:
             raise ValueError(
-                "Either 'model' or 'conformal_predictor' "
-                "must be provided."
+                "Either 'model' or 'conformal_predictor' must be provided, "
+                "or set conformal_method='cqr' with 'lower_model' and 'upper_model'."
             )
 
         if explainer is not None:
