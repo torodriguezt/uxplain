@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.inspection import partial_dependence
+from sklearn.inspection import partial_dependence, PartialDependenceDisplay
 from typing import List, Optional, Tuple
 
 from ..protocols import ConformalPredictorProtocol
@@ -58,8 +58,12 @@ class PDPExplanation:
     values: np.ndarray
     grid_values: List[np.ndarray]
     features: List[int]
+    kind: str = field(default="average")
     feature_names: Optional[List[str]] = field(default=None)
     individual: Optional[np.ndarray] = field(default=None)
+    feature_pairs: Optional[List[Tuple[int, int]]] = field(default=None)
+    values_2d: Optional[List[np.ndarray]] = field(default=None)
+    grid_values_2d: Optional[List[Tuple[np.ndarray, np.ndarray]]] = field(default=None)
 
 
 class PDPUncertaintyExplainer:
@@ -81,9 +85,11 @@ class PDPUncertaintyExplainer:
         method: str = "brute",
         features: Optional[List[int]] = None,
         grid_resolution: int = 100,
+        grid_resolution_2d: int = 20,
         percentiles: Tuple[float, float] = (0.05, 0.95),
         kind: str = "average",
         feature_names: Optional[List[str]] = None,
+        n_jobs: Optional[int] = None,
     ):
         """
         Initialize PDP explainer.
@@ -102,7 +108,12 @@ class PDPUncertaintyExplainer:
             Feature indices to explain. Defaults to all features.
 
         grid_resolution : int
-            Number of grid points per feature.
+            Number of grid points per 1D feature.
+
+        grid_resolution_2d : int
+            Number of grid points per axis for 2D interaction plots.
+            Kept separate from ``grid_resolution`` because 2D requires
+            ``grid_resolution_2d²`` evaluations per pair.
 
         percentiles : tuple of float
             Lower and upper percentile bounds for the grid.
@@ -113,6 +124,10 @@ class PDPUncertaintyExplainer:
 
         feature_names : list of str, optional
             Feature names for explanation output.
+
+        n_jobs : int, optional
+            Number of parallel jobs for ``PartialDependenceDisplay``.
+            ``-1`` uses all available cores.
         """
 
         self.cp = cp
@@ -120,15 +135,19 @@ class PDPUncertaintyExplainer:
         self.method = method
         self.features = features
         self.grid_resolution = grid_resolution
+        self.grid_resolution_2d = grid_resolution_2d
         self.percentiles = percentiles
         self.kind = kind
         self.feature_names = feature_names
+        self.n_jobs = n_jobs
 
         self._estimator: Optional[_FunctionEstimator] = None
 
     def fit(
         self,
         X_background: np.ndarray,
+        features: Optional[List] = None,
+        kind: Optional[str] = None,
         **_,
     ) -> None:
         """
@@ -138,7 +157,43 @@ class PDPUncertaintyExplainer:
         ----------
         X_background : np.ndarray
             Data used to set the grid range for each feature.
+        features : list, optional
+            Mixed list accepted by ``PartialDependenceDisplay.from_estimator``:
+
+            - Integers or strings → 1D PDP (e.g. ``[0, 1, "age"]``)
+            - Tuples of two → 2D interaction heatmap (e.g. ``[(0, 1)]``)
+            - Both together → ``[0, 1, (0, 1)]``
+
+            Resets to all features (1D only) when ``None``.
+        kind : {"average", "individual", "both"}, optional
+            Overrides the value set at ``__init__``. Resets to
+            ``"average"`` when ``None``.
         """
+
+        self.kind = kind if kind is not None else "average"
+
+        if features is None:
+            self.features = None
+            self.feature_pairs = None
+        else:
+            features_1d = []
+            features_2d = []
+            for f in features:
+                if isinstance(f, tuple):
+                    features_2d.append(f)
+                else:
+                    features_1d.append(f)
+
+            def _resolve(idx):
+                if self.feature_names and isinstance(idx, str):
+                    return self.feature_names.index(idx)
+                return idx
+
+            # Keep [] (explicitly empty) separate from None (not set = all features)
+            self.features = [_resolve(f) for f in features_1d]
+            self.feature_pairs = [
+                (_resolve(a), _resolve(b)) for a, b in features_2d
+            ] or None
 
         width_function = make_interval_width_function(
             self.cp,
@@ -153,6 +208,10 @@ class PDPUncertaintyExplainer:
     ) -> PDPExplanation:
         """
         Compute partial dependence for each feature.
+
+        Uses ``PartialDependenceDisplay.from_estimator`` which accepts a
+        mixed feature list (ints for 1D, tuples for 2D) in a single call,
+        enabling parallelism via ``n_jobs``.
 
         Parameters
         ----------
@@ -169,17 +228,22 @@ class PDPUncertaintyExplainer:
         if self._estimator is None:
             raise RuntimeError("Explainer not fitted. Call fit() first.")
 
-        features = (
-            self.features
-            if self.features is not None
-            else list(range(X.shape[1]))
-        )
+        feature_pairs = self.feature_pairs or []
 
+        if self.features is None:
+            features_1d = list(range(X.shape[1]))
+        elif not self.features and feature_pairs:
+            # Only tuples passed → compute 1D for each member of the pairs
+            features_1d = sorted({f for pair in feature_pairs for f in pair})
+        else:
+            features_1d = self.features
+
+        # 1D: loop with partial_dependence
         values = []
         grid_values = []
         individual = [] if self.kind in ("individual", "both") else None
 
-        for feature in features:
+        for feature in features_1d:
             pd_result = partial_dependence(
                 self._estimator,
                 X,
@@ -195,11 +259,34 @@ class PDPUncertaintyExplainer:
             if self.kind in ("individual", "both"):
                 individual.append(pd_result["individual"][0])
 
+        # 2D: PartialDependenceDisplay.from_estimator with reduced grid
+        values_2d = []
+        grid_values_2d = []
+
+        if feature_pairs:
+            display_2d = PartialDependenceDisplay.from_estimator(
+                self._estimator,
+                X,
+                features=feature_pairs,
+                method=self.method,
+                grid_resolution=self.grid_resolution_2d,
+                percentiles=self.percentiles,
+                kind="average",
+                n_jobs=self.n_jobs,
+            )
+            for result in display_2d.pd_results:
+                values_2d.append(result["average"][0])
+                grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
+
         explanation = PDPExplanation(
             values=np.array(values),
             grid_values=grid_values,
-            features=features,
+            features=features_1d,
+            kind=self.kind,
             individual=np.array(individual) if individual is not None else None,
+            feature_pairs=feature_pairs,
+            values_2d=values_2d or None,
+            grid_values_2d=grid_values_2d or None,
         )
 
         if self.feature_names is not None:

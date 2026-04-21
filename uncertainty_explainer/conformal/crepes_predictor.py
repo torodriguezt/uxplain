@@ -52,6 +52,7 @@ class CrepesConformalPredictor:
         self.wrapper = None
         self.difficulty_estimator = None
         self.mondrian_categorizer = None
+        self._feature_names = None
 
     def fit(
         self,
@@ -70,6 +71,9 @@ class CrepesConformalPredictor:
         3. Calibrate conformal predictor
         """
 
+        if hasattr(X_train, "columns"):
+            self._feature_names = list(X_train.columns)
+
         # Train
         self.model.fit(
             X_train,
@@ -86,7 +90,8 @@ class CrepesConformalPredictor:
 
         if self.method in ("mondrian", "normalized_mondrian"):
             self.mondrian_categorizer = MondrianCategorizer()
-            self.mondrian_categorizer.fit(X_train, y=y_train)
+            mc_kwargs = {"de": self.difficulty_estimator} if self.method == "normalized_mondrian" else {"f": self.model.predict}
+            self.mondrian_categorizer.fit(X_train, **mc_kwargs)
             calibrate_kwargs["mc"] = self.mondrian_categorizer
 
         self.wrapper = WrapRegressor(
@@ -123,16 +128,20 @@ class CrepesConformalPredictor:
         if self.wrapper is None:
             raise RuntimeError("CrepesConformalPredictor not fitted.")
 
-        predict_kwargs = {}
-        if self.difficulty_estimator is not None:
-            predict_kwargs["de"] = self.difficulty_estimator
-        if self.mondrian_categorizer is not None:
-            predict_kwargs["mc"] = self.mondrian_categorizer
+        if self._feature_names is not None and not hasattr(X, "columns"):
+            import pandas as pd
+            X = pd.DataFrame(X, columns=self._feature_names)
+
+        # predict_kwargs = {}
+        # if self.difficulty_estimator is not None:
+        #     predict_kwargs["de"] = self.difficulty_estimator
+        # if self.mondrian_categorizer is not None:
+        #     predict_kwargs["mc"] = self.mondrian_categorizer
 
         intervals = self.wrapper.predict_int(
             X,
             confidence=confidence,
-            **predict_kwargs,
+          #  **predict_kwargs,
         )
 
         lower = intervals[:, 0]

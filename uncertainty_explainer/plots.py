@@ -16,7 +16,7 @@ def generate_default_plots(
     X=None,
     kinds: list[str] | None = None,
     feature_names: list[str] | None = None,
-    waterfall_index: int = 0,
+    waterfall_index: int | None = None,
     show: bool = True,
 ):
     """
@@ -37,8 +37,9 @@ def generate_default_plots(
     feature_names : list of str, optional
         Feature names for axis labels.
 
-    waterfall_index : int
-        Sample index for waterfall plot.
+    waterfall_index : int or None
+        Sample index for waterfall plot. When ``None``, auto-selects
+        the instance with the highest total absolute SHAP contribution.
 
     show : bool
         Whether to display plots.
@@ -54,6 +55,10 @@ def generate_default_plots(
 
     if feature_names is not None:
         shap_values.feature_names = feature_names
+
+    auto_selected = waterfall_index is None
+    if auto_selected:
+        waterfall_index = int(np.abs(shap_values.values).sum(axis=1).argmax())
 
     figures = {}
 
@@ -88,7 +93,14 @@ def generate_default_plots(
             shap_values[waterfall_index],
             show=False,
         )
-        figures["waterfall"] = plt.gcf()
+        fig = plt.gcf()
+        title = (
+            f"Highest SHAP contribution instance (sample {waterfall_index})"
+            if auto_selected
+            else f"SHAP waterfall — sample {waterfall_index}"
+        )
+        fig.suptitle(title, y=1.01, fontsize=11)
+        figures["waterfall"] = fig
 
     if show:
         plt.show()
@@ -133,6 +145,9 @@ def generate_lime_plots(
 
     if kinds is None:
         kinds = ["local", "global"] if explanation.scope == "global" else ["local"]
+
+    if sample_index is None:
+        sample_index = 0
 
     fnames = explanation.feature_names
     n = len(fnames)
@@ -213,7 +228,16 @@ def generate_pdp_plots(
     """
 
     if kinds is None:
-        kinds = ["pdp", "importance"]
+        n_features = len(explanation.features)
+        has_pairs = bool(explanation.values_2d)
+        if explanation.kind == "individual":
+            kinds = ["ice"]
+        elif explanation.kind == "both":
+            kinds = ["pdp", "pdp_ice"] if n_features == 1 else ["pdp", "pdp_ice", "importance"]
+        else:
+            kinds = ["pdp"] if n_features == 1 else ["pdp", "importance"]
+        if has_pairs:
+            kinds = kinds + ["pdp_2d"]
 
     if feature_names is not None:
         explanation.feature_names = feature_names
@@ -227,7 +251,7 @@ def generate_pdp_plots(
     figures = {}
 
     # --- PDP ---
-    if "pdp" in kinds:
+    if "pdp" in kinds and n > 0:
         ncols = min(3, n)
         nrows = int(np.ceil(n / ncols))
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows))
@@ -246,7 +270,7 @@ def generate_pdp_plots(
         figures["pdp"] = fig
 
     # --- ICE ---
-    if "ice" in kinds:
+    if "ice" in kinds and n > 0:
         ncols = min(3, n)
         nrows = int(np.ceil(n / ncols))
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows))
@@ -269,7 +293,7 @@ def generate_pdp_plots(
         figures["ice"] = fig
 
     # --- PDP + ICE overlay ---
-    if "pdp_ice" in kinds:
+    if "pdp_ice" in kinds and n > 0:
         ncols = min(3, n)
         nrows = int(np.ceil(n / ncols))
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows))
@@ -291,8 +315,30 @@ def generate_pdp_plots(
         fig.tight_layout()
         figures["pdp_ice"] = fig
 
+    # --- 2D PDP heatmaps ---
+    if "pdp_2d" in kinds and explanation.values_2d:
+        for idx, (pair, z, (gx, gy)) in enumerate(
+            zip(explanation.feature_pairs, explanation.values_2d, explanation.grid_values_2d)
+        ):
+            fname_a = (
+                explanation.feature_names[pair[0]]
+                if explanation.feature_names else f"Feature {pair[0]}"
+            )
+            fname_b = (
+                explanation.feature_names[pair[1]]
+                if explanation.feature_names else f"Feature {pair[1]}"
+            )
+            fig, ax = plt.subplots(figsize=(6, 5))
+            mesh = ax.pcolormesh(gx, gy, z.T, cmap="RdYlBu_r", shading="auto")
+            fig.colorbar(mesh, ax=ax, label="Interval width")
+            ax.set_xlabel(fname_a)
+            ax.set_ylabel(fname_b)
+            ax.set_title(f"2D PDP — {fname_a} × {fname_b}")
+            fig.tight_layout()
+            figures[f"pdp_2d_{idx}"] = fig
+
     # --- Feature importance (PDP std — Greenwell et al. 2018) ---
-    if "importance" in kinds:
+    if "importance" in kinds and n > 0:
         importance = np.array([
             explanation.values[i].std(ddof=1)
             for i in range(n)
