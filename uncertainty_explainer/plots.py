@@ -228,16 +228,13 @@ def generate_pdp_plots(
     """
 
     if kinds is None:
-        n_features = len(explanation.features)
-        has_pairs = bool(explanation.values_2d)
+        has_1d = len(explanation.features) > 0
         if explanation.kind == "individual":
-            kinds = ["ice"]
+            kinds = ["ice"] if has_1d else []
         elif explanation.kind == "both":
-            kinds = ["pdp", "pdp_ice"] if n_features == 1 else ["pdp", "pdp_ice", "importance"]
+            kinds = ["pdp_ice"] if has_1d else []
         else:
-            kinds = ["pdp"] if n_features == 1 else ["pdp", "importance"]
-        if has_pairs:
-            kinds = kinds + ["pdp_2d"]
+            kinds = ["pdp"] if has_1d else []
 
     if feature_names is not None:
         explanation.feature_names = feature_names
@@ -258,7 +255,7 @@ def generate_pdp_plots(
         axes = np.array(axes).flatten()
         for i in range(n):
             ax = axes[i]
-            ax.plot(explanation.grid_values[i], explanation.values[i], lw=2)
+            ax.plot(explanation.grid_values[i], explanation.values[i], lw=2, color="tomato")
             ax.set_xlabel(_fname(i))
             ax.set_ylabel("Interval width")
             ax.set_title(f"PDP — {_fname(i)}")
@@ -328,9 +325,12 @@ def generate_pdp_plots(
                 explanation.feature_names[pair[1]]
                 if explanation.feature_names else f"Feature {pair[1]}"
             )
+            GX, GY = np.meshgrid(gx, gy)
             fig, ax = plt.subplots(figsize=(6, 5))
-            mesh = ax.pcolormesh(gx, gy, z.T, cmap="RdYlBu_r", shading="auto")
-            fig.colorbar(mesh, ax=ax, label="Interval width")
+            filled = ax.contourf(GX, GY, z.T, levels=12, cmap="RdYlBu_r")
+            lines = ax.contour(GX, GY, z.T, levels=filled.levels, colors="white", linewidths=0.6, alpha=0.5)
+            ax.clabel(lines, inline=True, fontsize=7, fmt="%.2f")
+            fig.colorbar(filled, ax=ax, label="Interval width")
             ax.set_xlabel(fname_a)
             ax.set_ylabel(fname_b)
             ax.set_title(f"2D PDP — {fname_a} × {fname_b}")
@@ -347,10 +347,10 @@ def generate_pdp_plots(
         labels = [_fname(i) for i in order]
 
         fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
-        bars = ax.barh(labels, importance[order], color="steelblue")
+        bars = ax.barh(labels, importance[order], color="gray")
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.set_xlabel(r"$I(\mathbf{x}_S)$ — std of PDP values")
-        ax.set_title("Feature importance — Uncertainty PDP")
+        ax.set_title("Feature importance")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["importance"] = fig

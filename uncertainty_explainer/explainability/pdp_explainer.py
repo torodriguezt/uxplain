@@ -55,12 +55,12 @@ class PDPExplanation:
         Only present when ``kind="individual"`` or ``kind="both"``.
     """
 
-    values: np.ndarray
+    values: List[np.ndarray]
     grid_values: List[np.ndarray]
     features: List[int]
     kind: str = field(default="average")
     feature_names: Optional[List[str]] = field(default=None)
-    individual: Optional[np.ndarray] = field(default=None)
+    individual: Optional[List[np.ndarray]] = field(default=None)
     feature_pairs: Optional[List[Tuple[int, int]]] = field(default=None)
     values_2d: Optional[List[np.ndarray]] = field(default=None)
     grid_values_2d: Optional[List[Tuple[np.ndarray, np.ndarray]]] = field(default=None)
@@ -279,11 +279,11 @@ class PDPUncertaintyExplainer:
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
 
         explanation = PDPExplanation(
-            values=np.array(values),
+            values=values,
             grid_values=grid_values,
             features=features_1d,
             kind=self.kind,
-            individual=np.array(individual) if individual is not None else None,
+            individual=individual,
             feature_pairs=feature_pairs,
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
