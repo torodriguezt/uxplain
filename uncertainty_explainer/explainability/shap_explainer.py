@@ -9,7 +9,8 @@ import shap
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import (
-    make_interval_width_function,
+    UncertaintyMetric,
+    make_uncertainty_function,
 )
 
 
@@ -24,6 +25,7 @@ class ShapUncertaintyExplainer:
         confidence: float = 0.9,
         algorithm: str = "auto",
         feature_names: list[str] | None = None,
+        metric: UncertaintyMetric = "width",
     ):
         """
         Initialize SHAP explainer.
@@ -39,12 +41,16 @@ class ShapUncertaintyExplainer:
 
         feature_names : list of str, optional
             Feature names for SHAP explanation output.
+
+        metric : {"width", "lower", "upper", "midpoint"}
+            Which scalar function of ``(lower, upper)`` to explain.
         """
 
         self.cp = cp
         self.confidence = confidence
         self.algorithm = algorithm
         self.feature_names = feature_names
+        self.metric = metric
 
         self._shap_explainer: shap.Explainer | None = None
 
@@ -57,15 +63,14 @@ class ShapUncertaintyExplainer:
         Build SHAP explainer from background data.
         """
 
-        width_function = (
-            make_interval_width_function(
-                self.cp,
-                confidence=self.confidence,
-            )
+        target_function = make_uncertainty_function(
+            self.cp,
+            confidence=self.confidence,
+            metric=self.metric,
         )
 
         self._shap_explainer = shap.Explainer(
-            width_function,
+            target_function,
             X_background,
             algorithm=algorithm or self.algorithm,
         )
