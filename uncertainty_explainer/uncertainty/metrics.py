@@ -19,7 +19,6 @@ from typing import Callable, Literal
 
 import numpy as np
 
-
 UncertaintyMetric = Literal["width", "lower", "upper", "midpoint"]
 
 
