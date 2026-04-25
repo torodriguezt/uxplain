@@ -5,21 +5,20 @@ Main pipeline for uncertainty explanation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from typing import Any, Literal
 
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+from .conformal.cqr_predictor import CQRConformalPredictor
 from .conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )
-from .conformal.cqr_predictor import CQRConformalPredictor
-from .explainability.shap_explainer import ShapUncertaintyExplainer
-from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.lime_explainer import LimeUncertaintyExplainer
-from .plots import generate_default_plots, generate_pdp_plots, generate_lime_plots
+from .explainability.pdp_explainer import PDPUncertaintyExplainer
+from .explainability.shap_explainer import ShapUncertaintyExplainer
+from .plots import generate_default_plots, generate_lime_plots, generate_pdp_plots
 from .protocols import (
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
