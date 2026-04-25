@@ -11,7 +11,7 @@ import numpy as np
 from lime.lime_tabular import LimeTabularExplainer
 
 from ..protocols import ConformalPredictorProtocol
-from ..uncertainty.metrics import make_interval_width_function
+from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
 
 
 @dataclass
@@ -30,17 +30,22 @@ class LIMEExplanation:
     local_coefficients : np.ndarray, shape (n_samples, n_features)
         LIME linear coefficients for each explained sample.
         A positive coefficient means that feature increases the
-        predicted interval width for that sample; negative means
-        it decreases it.
+        explained metric for that sample; negative means it decreases it.
 
     global_importance : np.ndarray, shape (n_features,)
         Mean of absolute local coefficients across all samples —
         a global feature importance measure.
+
+    metric : str
+        The uncertainty metric being explained ("width", "lower",
+        "upper", or "midpoint"). Used by the plotting layer for axis
+        labels.
     """
 
     scope: str
     feature_names: List[str]
     local_coefficients: np.ndarray
+    metric: str = "width"
     global_importance: np.ndarray = field(init=False)
 
     def __post_init__(self):
@@ -72,6 +77,7 @@ class LimeUncertaintyExplainer:
         n_lime_samples: int = 5000,
         feature_names: Optional[List[str]] = None,
         random_state: int | None = None,
+        metric: UncertaintyMetric = "width",
     ):
         """
         Parameters
@@ -95,6 +101,9 @@ class LimeUncertaintyExplainer:
         random_state : int, optional
             Seed for LIME's perturbation sampling. Set for
             reproducible coefficients across runs.
+
+        metric : {"width", "lower", "upper", "midpoint"}
+            Which scalar function of ``(lower, upper)`` to explain.
         """
 
         self.cp = cp
@@ -103,9 +112,10 @@ class LimeUncertaintyExplainer:
         self.n_lime_samples = n_lime_samples
         self.feature_names = feature_names
         self.random_state = random_state
+        self.metric = metric
 
         self._lime_explainer: LimeTabularExplainer | None = None
-        self._width_fn = None
+        self._target_fn = None
         self._n_features: int | None = None
 
     def fit(
@@ -134,7 +144,9 @@ class LimeUncertaintyExplainer:
             mode="regression",
             random_state=self.random_state,
         )
-        self._width_fn = make_interval_width_function(self.cp, self.confidence)
+        self._target_fn = make_uncertainty_function(
+            self.cp, self.confidence, metric=self.metric,
+        )
 
     def explain(
         self,
@@ -168,7 +180,7 @@ class LimeUncertaintyExplainer:
         for i, sample in enumerate(X):
             exp = self._lime_explainer.explain_instance(
                 sample,
-                self._width_fn,
+                self._target_fn,
                 num_features=self._n_features,
                 num_samples=self.n_lime_samples,
             )
@@ -180,4 +192,5 @@ class LimeUncertaintyExplainer:
             scope=self.scope,
             feature_names=fnames,
             local_coefficients=coefficients,
+            metric=self.metric,
         )
