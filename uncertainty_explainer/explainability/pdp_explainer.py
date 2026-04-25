@@ -54,7 +54,7 @@ class PDPExplanation:
         Only present when ``kind="individual"`` or ``kind="both"``.
     """
 
-    values: List[np.ndarray]
+    values: np.ndarray
     grid_values: List[np.ndarray]
     features: List[int]
     kind: str = field(default="average")
@@ -298,7 +298,7 @@ class PDPUncertaintyExplainer:
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
 
         explanation = PDPExplanation(
-            values=values,
+            values=np.array(values) if values else values,
             grid_values=grid_values,
             features=features_1d,
             kind=self.kind,
