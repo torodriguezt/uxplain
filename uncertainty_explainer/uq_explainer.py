@@ -24,6 +24,7 @@ from .protocols import (
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
+from .uncertainty.metrics import UncertaintyMetric
 
 XAIMethod = Literal["shap", "pdp", "lime"]
 
@@ -71,6 +72,7 @@ class UncertaintyExplanationPipeline:
         confidence: float = 0.9,
         conformal_method: ConformalMethod | Literal["cqr"] = "normalized",
         xai_method: XAIMethod = "shap",
+        uncertainty_metric: UncertaintyMetric = "width",
         lime_scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
         random_state: int | None = None,
@@ -100,6 +102,20 @@ class UncertaintyExplanationPipeline:
         xai_method : {"shap", "pdp", "lime"}
             Explainability method to use. Ignored if ``explainer``
             is provided.
+
+        uncertainty_metric : {"width", "lower", "upper", "midpoint"}
+            Which scalar function of the conformal interval to explain:
+
+            - ``"width"``    — interval width ``upper - lower`` (default;
+              "how uncertain is the prediction").
+            - ``"lower"``    — lower bound (drivers of the pessimistic
+              prediction).
+            - ``"upper"``    — upper bound (drivers of the optimistic
+              prediction).
+            - ``"midpoint"`` — ``(lower + upper) / 2`` (drivers of the
+              central prediction).
+
+            Ignored if ``explainer`` is provided.
 
         lime_scope : {"local", "global"}
             Scope for the LIME explainer when ``xai_method="lime"``.
@@ -135,6 +151,7 @@ class UncertaintyExplanationPipeline:
 
         self.confidence = confidence
         self.xai_method = xai_method
+        self.uncertainty_metric = uncertainty_metric
         self.random_state = random_state
 
         if conformal_predictor is not None:
@@ -163,11 +180,13 @@ class UncertaintyExplanationPipeline:
             self.explainer = PDPUncertaintyExplainer(
                 cp=self.cp,
                 confidence=self.confidence,
+                metric=uncertainty_metric,
             )
         elif xai_method == "shap":
             self.explainer = ShapUncertaintyExplainer(
                 cp=self.cp,
                 confidence=self.confidence,
+                metric=uncertainty_metric,
             )
         elif xai_method == "lime":
             self.explainer = LimeUncertaintyExplainer(
@@ -176,6 +195,7 @@ class UncertaintyExplanationPipeline:
                 scope=lime_scope,
                 n_lime_samples=n_lime_samples,
                 random_state=random_state,
+                metric=uncertainty_metric,
             )
         else:
             raise ValueError(
