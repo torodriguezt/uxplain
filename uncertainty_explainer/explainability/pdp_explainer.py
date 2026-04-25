@@ -13,7 +13,7 @@ from sklearn.inspection import partial_dependence, PartialDependenceDisplay
 from typing import List, Optional, Tuple
 
 from ..protocols import ConformalPredictorProtocol
-from ..uncertainty.metrics import make_interval_width_function
+from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
 
 
 class _FunctionEstimator(RegressorMixin, BaseEstimator):
@@ -64,6 +64,7 @@ class PDPExplanation:
     feature_pairs: Optional[List[Tuple[int, int]]] = field(default=None)
     values_2d: Optional[List[np.ndarray]] = field(default=None)
     grid_values_2d: Optional[List[Tuple[np.ndarray, np.ndarray]]] = field(default=None)
+    metric: str = field(default="width")
 
 
 class PDPUncertaintyExplainer:
@@ -90,6 +91,7 @@ class PDPUncertaintyExplainer:
         kind: str = "average",
         feature_names: Optional[List[str]] = None,
         n_jobs: Optional[int] = None,
+        metric: UncertaintyMetric = "width",
     ):
         """
         Initialize PDP explainer.
@@ -128,6 +130,9 @@ class PDPUncertaintyExplainer:
         n_jobs : int, optional
             Number of parallel jobs for ``PartialDependenceDisplay``.
             ``-1`` uses all available cores.
+
+        metric : {"width", "lower", "upper", "midpoint"}
+            Which scalar function of ``(lower, upper)`` to explain.
         """
 
         self.cp = cp
@@ -140,6 +145,7 @@ class PDPUncertaintyExplainer:
         self.kind = kind
         self.feature_names = feature_names
         self.n_jobs = n_jobs
+        self.metric = metric
 
         self._estimator: Optional[_FunctionEstimator] = None
 
@@ -148,6 +154,8 @@ class PDPUncertaintyExplainer:
         X_background: np.ndarray,
         features: Optional[List] = None,
         kind: Optional[str] = None,
+        grid_resolution: Optional[int] = None,
+        percentiles: Optional[Tuple[float, float]] = None,
         **_,
     ) -> None:
         """
@@ -164,13 +172,21 @@ class PDPUncertaintyExplainer:
             - Tuples of two → 2D interaction heatmap (e.g. ``[(0, 1)]``)
             - Both together → ``[0, 1, (0, 1)]``
 
-            Resets to all features (1D only) when ``None``.
+            Unchanged when ``None``.
         kind : {"average", "individual", "both"}, optional
-            Overrides the value set at ``__init__``. Resets to
-            ``"average"`` when ``None``.
+            Overrides the value set at ``__init__``. Unchanged when ``None``.
+        grid_resolution : int, optional
+            Overrides the value set at ``__init__``. Unchanged when ``None``.
+        percentiles : tuple of float, optional
+            Overrides the value set at ``__init__``. Unchanged when ``None``.
         """
 
-        self.kind = kind if kind is not None else "average"
+        if kind is not None:
+            self.kind = kind
+        if grid_resolution is not None:
+            self.grid_resolution = grid_resolution
+        if percentiles is not None:
+            self.percentiles = percentiles
 
         if features is None:
             self.features = None
@@ -195,12 +211,13 @@ class PDPUncertaintyExplainer:
                 (_resolve(a), _resolve(b)) for a, b in features_2d
             ] or None
 
-        width_function = make_interval_width_function(
+        target_function = make_uncertainty_function(
             self.cp,
             confidence=self.confidence,
+            metric=self.metric,
         )
 
-        self._estimator = _FunctionEstimator(width_function).fit(X_background)
+        self._estimator = _FunctionEstimator(target_function).fit(X_background)
 
     def explain(
         self,
@@ -243,6 +260,10 @@ class PDPUncertaintyExplainer:
         grid_values = []
         individual = [] if self.kind in ("individual", "both") else None
 
+        # When kind="individual" we still need average values for importance/pdp
+        # plots, so internally request "both" and always populate values.
+        internal_kind = "both" if self.kind == "individual" else self.kind
+
         for feature in features_1d:
             pd_result = partial_dependence(
                 self._estimator,
@@ -251,11 +272,10 @@ class PDPUncertaintyExplainer:
                 method=self.method,
                 grid_resolution=self.grid_resolution,
                 percentiles=self.percentiles,
-                kind=self.kind,
+                kind=internal_kind,
             )
             grid_values.append(pd_result["grid_values"][0])
-            if self.kind in ("average", "both"):
-                values.append(pd_result["average"][0])
+            values.append(pd_result["average"][0])
             if self.kind in ("individual", "both"):
                 individual.append(pd_result["individual"][0])
 
@@ -287,6 +307,7 @@ class PDPUncertaintyExplainer:
             feature_pairs=feature_pairs,
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
+            metric=self.metric,
         )
 
         if self.feature_names is not None:
