@@ -15,6 +15,7 @@ from .conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )
+from .conformal.cqr_predictor import CQRConformalPredictor
 from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.lime_explainer import LimeUncertaintyExplainer
@@ -27,7 +28,7 @@ from .protocols import (
 XAIMethod = Literal["shap", "pdp", "lime"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
-VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance")
+VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance", "pdp_2d")
 VALID_LIME_PLOT_KINDS = ("local", "global")
 
 
@@ -68,11 +69,13 @@ class UncertaintyExplanationPipeline:
         self,
         model=None,
         confidence: float = 0.9,
-        conformal_method: ConformalMethod = "normalized",
+        conformal_method: ConformalMethod | Literal["cqr"] = "normalized",
         xai_method: XAIMethod = "shap",
         lime_scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
         random_state: int | None = None,
+        lower_model=None,
+        upper_model=None,
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
     ):
@@ -82,15 +85,16 @@ class UncertaintyExplanationPipeline:
         Parameters
         ----------
         model
-            sklearn-compatible regressor. Required when using
-            the default CrepesConformalPredictor. Can be omitted
-            if a custom conformal_predictor is provided.
+            sklearn-compatible regressor. Required for crepes methods.
+            Ignored when ``conformal_method="cqr"`` or when a custom
+            ``conformal_predictor`` is provided.
 
         confidence : float
 
-        conformal_method : ConformalMethod
+        conformal_method : str
             Conformal prediction method. One of ``"standard"``,
-            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``.
+            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``
+            (crepes-based), or ``"cqr"`` (Conformalized Quantile Regression).
             Ignored if ``conformal_predictor`` is provided.
 
         xai_method : {"shap", "pdp", "lime"}
@@ -110,10 +114,19 @@ class UncertaintyExplanationPipeline:
             Seed used for stochastic steps: the auto calibration
             split in ``fit()`` and, when ``xai_method="lime"``, the
             LIME perturbation sampler.
+        lower_model
+            Quantile regressor for the lower bound, e.g.
+            ``GradientBoostingRegressor(loss="quantile", alpha=0.05)``.
+            Required when ``conformal_method="cqr"``.
+
+        upper_model
+            Quantile regressor for the upper bound, e.g.
+            ``GradientBoostingRegressor(loss="quantile", alpha=0.95)``.
+            Required when ``conformal_method="cqr"``.
 
         conformal_predictor : ConformalPredictorProtocol, optional
-            Custom conformal predictor. If not provided,
-            defaults to ``CrepesConformalPredictor(model)``.
+            Custom conformal predictor. Overrides ``conformal_method``
+            when provided.
 
         explainer : UncertaintyExplainerProtocol, optional
             Custom explainer instance. Overrides ``xai_method``
@@ -126,6 +139,13 @@ class UncertaintyExplanationPipeline:
 
         if conformal_predictor is not None:
             self.cp = conformal_predictor
+        elif conformal_method == "cqr":
+            if lower_model is None or upper_model is None:
+                raise ValueError(
+                    "conformal_method='cqr' requires both 'lower_model' "
+                    "and 'upper_model'."
+                )
+            self.cp = CQRConformalPredictor(lower_model, upper_model)
         elif model is not None:
             self.cp = CrepesConformalPredictor(
                 model,
@@ -133,8 +153,8 @@ class UncertaintyExplanationPipeline:
             )
         else:
             raise ValueError(
-                "Either 'model' or 'conformal_predictor' "
-                "must be provided."
+                "Either 'model' or 'conformal_predictor' must be provided, "
+                "or set conformal_method='cqr' with 'lower_model' and 'upper_model'."
             )
 
         if explainer is not None:
@@ -200,11 +220,18 @@ class UncertaintyExplanationPipeline:
             pipeline-level ``random_state`` for this call only.
         """
 
-        # Extract feature names from DataFrame
+        # Extract feature names from DataFrame before converting
         if hasattr(X_train, "columns"):
             self._feature_names = list(X_train.columns)
             if hasattr(self.explainer, "feature_names"):
                 self.explainer.feature_names = self._feature_names
+
+        X_train = np.asarray(X_train)
+        y_train = np.asarray(y_train)
+        if X_calib is not None:
+            X_calib = np.asarray(X_calib)
+        if y_calib is not None:
+            y_calib = np.asarray(y_calib)
 
         # Auto-split if calibration set not provided
         if X_calib is None or y_calib is None:
@@ -269,7 +296,7 @@ class UncertaintyExplanationPipeline:
         X,
         show_plots: bool = True,
         plot_kind: str | list[str] | None = None,
-        waterfall_index: int = 0,
+        waterfall_index: int | None = None,
         **explainer_kwargs,
     ) -> ExplanationResult:
         """
@@ -296,7 +323,21 @@ class UncertaintyExplanationPipeline:
 
         self._check_is_fitted()
         self._check_X(X)
-        X = np.asarray(X)
+        if isinstance(self.explainer, PDPUncertaintyExplainer) and np.asarray(X).shape[0] == 1:
+            raise ValueError(
+                "PDP does not support single-sample (local) explanations. "
+                "Use xai_method='shap' or 'lime' instead."
+            )
+        if plot_kind is not None:
+            self._resolve_plot_kinds(plot_kind, X=X)
+            kinds_list = [plot_kind] if isinstance(plot_kind, str) else plot_kind
+            if "pdp_2d" in kinds_list:
+                features_kw = explainer_kwargs.get("features", []) or []
+                if not any(isinstance(f, tuple) for f in features_kw):
+                    raise ValueError(
+                        "plot_kind='pdp_2d' requires at least one feature pair as a tuple, "
+                        "e.g. features=[(0, 1)] or features=[0, 1, (0, 1)]."
+                    )
 
         # Rebuild explainer if kwargs changed
         if self._explainer_kwargs != explainer_kwargs:
@@ -335,7 +376,7 @@ class UncertaintyExplanationPipeline:
         explanation_values,
         X=None,
         kind: str | list[str] | None = None,
-        waterfall_index: int = 0,
+        waterfall_index: int | None = None,
     ):
         """
         Generate plot(s) from existing explanation results.
@@ -355,7 +396,7 @@ class UncertaintyExplanationPipeline:
             Sample index for SHAP waterfall plot.
         """
 
-        kinds = self._resolve_plot_kinds(kind)
+        kinds = self._resolve_plot_kinds(kind, X=X)
 
         if isinstance(self.explainer, PDPUncertaintyExplainer):
             generate_pdp_plots(
@@ -394,6 +435,7 @@ class UncertaintyExplanationPipeline:
     def _resolve_plot_kinds(
         self,
         kind: str | list[str] | None,
+        X=None,
     ) -> list[str]:
         if isinstance(self.explainer, PDPUncertaintyExplainer):
             valid = VALID_PDP_PLOT_KINDS
@@ -402,6 +444,12 @@ class UncertaintyExplanationPipeline:
         else:
             valid = VALID_PLOT_KINDS
         if kind is None:
+            if (
+                isinstance(self.explainer, ShapUncertaintyExplainer)
+                and X is not None
+                and np.asarray(X).shape[0] == 1
+            ):
+                return ["waterfall"]
             return None  # each plot function applies its own defaults
         if isinstance(kind, str):
             kind = [kind]

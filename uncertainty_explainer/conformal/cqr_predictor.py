@@ -48,6 +48,7 @@ class CQRConformalPredictor:
 
         self._scores: np.ndarray | None = None
         self._n_calib: int | None = None
+        self._feature_names: list | None = None
 
     def fit(
         self,
@@ -66,6 +67,9 @@ class CQRConformalPredictor:
         X_calib, y_calib
             Calibration data used to compute nonconformity scores.
         """
+
+        if hasattr(X_train, "columns"):
+            self._feature_names = list(X_train.columns)
 
         self.lower_model.fit(X_train, y_train)
         self.upper_model.fit(X_train, y_train)
@@ -99,6 +103,10 @@ class CQRConformalPredictor:
 
         if self._scores is None:
             raise RuntimeError("CQRConformalPredictor not fitted. Call fit() first.")
+
+        if self._feature_names is not None and not hasattr(X, "columns"):
+            import pandas as pd
+            X = pd.DataFrame(X, columns=self._feature_names)
 
         alpha = 1 - confidence
         # Finite-sample correction ensures valid marginal coverage
