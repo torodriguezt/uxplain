@@ -10,6 +10,8 @@ import numpy as np
 import shap
 import matplotlib.pyplot as plt
 
+from .uncertainty.metrics import metric_label
+
 
 def generate_default_plots(
     shap_values,
@@ -151,6 +153,7 @@ def generate_lime_plots(
 
     fnames = explanation.feature_names
     n = len(fnames)
+    metric_text = metric_label(getattr(explanation, "metric", "width")).lower()
     figures = {}
 
     # --- Local ---
@@ -164,7 +167,7 @@ def generate_lime_plots(
         bars = ax.barh(labels, coefs[order], color=colors)
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.axvline(0, color="black", linewidth=0.8)
-        ax.set_xlabel("LIME coefficient (effect on interval width)")
+        ax.set_xlabel(f"LIME coefficient (effect on {metric_text})")
         ax.set_title(f"LIME — Local explanation (sample {sample_index})")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
@@ -179,7 +182,9 @@ def generate_lime_plots(
         fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
         bars = ax.barh(labels, importance[order], color="steelblue")
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
-        ax.set_xlabel(r"Mean $|\text{LIME coefficient}|$ (effect on interval width)")
+        ax.set_xlabel(
+            r"Mean $|\text{LIME coefficient}|$ (effect on " + metric_text + ")"
+        )
         ax.set_title("LIME — Global feature importance")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
@@ -244,6 +249,9 @@ def generate_pdp_plots(
             return explanation.feature_names[i]
         return f"Feature {explanation.features[i]}"
 
+    metric_name = metric_label(getattr(explanation, "metric", "width"))
+    metric_text = metric_name.lower()
+
     n = len(explanation.features)
     figures = {}
 
@@ -257,12 +265,12 @@ def generate_pdp_plots(
             ax = axes[i]
             ax.plot(explanation.grid_values[i], explanation.values[i], lw=2, color="tomato")
             ax.set_xlabel(_fname(i))
-            ax.set_ylabel("Interval width")
+            ax.set_ylabel(metric_name)
             ax.set_title(f"PDP — {_fname(i)}")
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle("Partial Dependence — Uncertainty (interval width)", y=1.01)
+        fig.suptitle(f"Partial Dependence — Uncertainty ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["pdp"] = fig
 
@@ -280,12 +288,12 @@ def generate_pdp_plots(
             for line in explanation.individual[i]:
                 ax.plot(explanation.grid_values[i], line, lw=0.5, alpha=0.3, color="steelblue")
             ax.set_xlabel(_fname(i))
-            ax.set_ylabel("Interval width")
+            ax.set_ylabel(metric_name)
             ax.set_title(f"ICE — {_fname(i)}")
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle("ICE — Uncertainty (interval width)", y=1.01)
+        fig.suptitle(f"ICE — Uncertainty ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["ice"] = fig
 
@@ -302,13 +310,13 @@ def generate_pdp_plots(
                     ax.plot(explanation.grid_values[i], line, lw=0.5, alpha=0.2, color="steelblue")
             ax.plot(explanation.grid_values[i], explanation.values[i], lw=2.5, color="tomato", label="PDP")
             ax.set_xlabel(_fname(i))
-            ax.set_ylabel("Interval width")
+            ax.set_ylabel(metric_name)
             ax.set_title(f"PDP + ICE — {_fname(i)}")
             ax.legend(fontsize=8)
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle("PDP + ICE — Uncertainty (interval width)", y=1.01)
+        fig.suptitle(f"PDP + ICE — Uncertainty ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["pdp_ice"] = fig
 
@@ -330,7 +338,7 @@ def generate_pdp_plots(
             filled = ax.contourf(GX, GY, z.T, levels=12, cmap="RdYlBu_r")
             lines = ax.contour(GX, GY, z.T, levels=filled.levels, colors="white", linewidths=0.6, alpha=0.5)
             ax.clabel(lines, inline=True, fontsize=7, fmt="%.2f")
-            fig.colorbar(filled, ax=ax, label="Interval width")
+            fig.colorbar(filled, ax=ax, label=metric_name)
             ax.set_xlabel(fname_a)
             ax.set_ylabel(fname_b)
             ax.set_title(f"2D PDP — {fname_a} × {fname_b}")
