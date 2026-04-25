@@ -7,8 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
-import numpy as np
 from lime.lime_tabular import LimeTabularExplainer
+import numpy as np
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function

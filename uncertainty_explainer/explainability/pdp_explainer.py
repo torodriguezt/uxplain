@@ -5,12 +5,11 @@ PDP explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 import numpy as np
-
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.inspection import partial_dependence, PartialDependenceDisplay
-from typing import List, Optional, Tuple
+from sklearn.inspection import PartialDependenceDisplay, partial_dependence
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
