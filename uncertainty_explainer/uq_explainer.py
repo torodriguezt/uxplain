@@ -29,7 +29,7 @@ XAIMethod = Literal["shap", "pdp", "lime"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
 VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance", "pdp_2d")
-VALID_LIME_PLOT_KINDS = ("local", "global")
+VALID_LIME_PLOT_KINDS = ("local")
 
 
 @dataclass
@@ -62,7 +62,7 @@ class UncertaintyExplanationPipeline:
 
     - ``"shap"`` — SHAP-based explanation (default)
     - ``"pdp"``  — Partial Dependence Plot explanation
-    - ``"lime"`` — LIME-based explanation (local or global)
+    - ``"lime"`` — LIME-based explanation 
     """
 
     def __init__(
@@ -72,7 +72,6 @@ class UncertaintyExplanationPipeline:
         conformal_method: ConformalMethod | Literal["cqr"] = "normalized",
         xai_method: XAIMethod = "shap",
         uncertainty_metric: UncertaintyMetric = "width",
-        lime_scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
         random_state: int | None = None,
         lower_model=None,
@@ -115,10 +114,6 @@ class UncertaintyExplanationPipeline:
               central prediction).
 
             Ignored if ``explainer`` is provided.
-
-        lime_scope : {"local", "global"}
-            Scope for the LIME explainer when ``xai_method="lime"``.
-            Ignored otherwise.
 
         n_lime_samples : int
             Number of perturbations per sample used by LIME.
@@ -191,7 +186,6 @@ class UncertaintyExplanationPipeline:
             self.explainer = LimeUncertaintyExplainer(
                 cp=self.cp,
                 confidence=self.confidence,
-                scope=lime_scope,
                 n_lime_samples=n_lime_samples,
                 random_state=random_state,
                 metric=uncertainty_metric,

@@ -52,7 +52,6 @@ class CrepesConformalPredictor:
         self.wrapper = None
         self.difficulty_estimator = None
         self.mondrian_categorizer = None
-        self._feature_names = None
 
     def fit(
         self,
@@ -70,9 +69,6 @@ class CrepesConformalPredictor:
         2. Fit difficulty estimator and/or Mondrian categorizer
         3. Calibrate conformal predictor
         """
-
-        if hasattr(X_train, "columns"):
-            self._feature_names = list(X_train.columns)
 
         # Train
         self.model.fit(
@@ -128,15 +124,7 @@ class CrepesConformalPredictor:
         if self.wrapper is None:
             raise RuntimeError("CrepesConformalPredictor not fitted.")
 
-        if self._feature_names is not None and not hasattr(X, "columns"):
-            import pandas as pd
-            X = pd.DataFrame(X, columns=self._feature_names)
-
-        # predict_kwargs = {}
-        # if self.difficulty_estimator is not None:
-        #     predict_kwargs["de"] = self.difficulty_estimator
-        # if self.mondrian_categorizer is not None:
-        #     predict_kwargs["mc"] = self.mondrian_categorizer
+        X = np.asarray(X)
 
         intervals = self.wrapper.predict_int(
             X,

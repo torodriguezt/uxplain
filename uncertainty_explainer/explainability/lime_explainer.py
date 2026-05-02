@@ -4,8 +4,8 @@ LIME explainer for uncertainty metrics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from dataclasses import dataclass
+from typing import List, Optional
 
 from lime.lime_tabular import LimeTabularExplainer
 import numpy as np
@@ -21,9 +21,6 @@ class LIMEExplanation:
 
     Attributes
     ----------
-    scope : {"local", "global"}
-        Explanation scope used when this object was produced.
-
     feature_names : list of str
         Names for each feature column.
 
@@ -32,48 +29,29 @@ class LIMEExplanation:
         A positive coefficient means that feature increases the
         explained metric for that sample; negative means it decreases it.
 
-    global_importance : np.ndarray, shape (n_features,)
-        Mean of absolute local coefficients across all samples —
-        a global feature importance measure.
-
     metric : str
         The uncertainty metric being explained ("width", "lower",
         "upper", or "midpoint"). Used by the plotting layer for axis
         labels.
     """
 
-    scope: str
     feature_names: List[str]
     local_coefficients: np.ndarray
     metric: str = "width"
-    global_importance: np.ndarray = field(init=False)
-
-    def __post_init__(self):
-        self.global_importance = np.mean(np.abs(self.local_coefficients), axis=0)
 
 
 class LimeUncertaintyExplainer:
     """
     LIME-based explainer for uncertainty metrics.
 
-    Supports two scopes via the ``scope`` parameter:
-
-    - ``"local"``  — one linear explanation per sample in X
-    - ``"global"`` — aggregation of local explanations (mean of
-      absolute coefficients), giving a dataset-level feature
-      importance view
-
-    In both cases the underlying computation is the same: LIME is
-    run per sample and the results are collected into a
-    ``LIMEExplanation``.  The ``scope`` value is stored in the result
-    so that the plotting layer knows which view to use by default.
+    Produces one linear explanation per sample in X, collected into a
+    ``LIMEExplanation`` with per-sample coefficients.
     """
 
     def __init__(
         self,
         cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
-        scope: Literal["local", "global"] = "local",
         n_lime_samples: int = 5000,
         feature_names: Optional[List[str]] = None,
         random_state: int | None = None,
@@ -86,9 +64,6 @@ class LimeUncertaintyExplainer:
             Fitted conformal predictor.
 
         confidence : float
-
-        scope : {"local", "global"}
-            Default explanation scope returned by ``explain()``.
 
         n_lime_samples : int
             Number of perturbed samples LIME generates per explained
@@ -108,7 +83,6 @@ class LimeUncertaintyExplainer:
 
         self.cp = cp
         self.confidence = confidence
-        self.scope = scope
         self.n_lime_samples = n_lime_samples
         self.feature_names = feature_names
         self.random_state = random_state
@@ -163,9 +137,7 @@ class LimeUncertaintyExplainer:
         Returns
         -------
         LIMEExplanation
-            Contains per-sample coefficients and aggregated global
-            importance.  The ``scope`` attribute reflects which view
-            was requested at init time.
+            Contains per-sample LIME coefficients.
         """
 
         if self._lime_explainer is None:
@@ -189,7 +161,6 @@ class LimeUncertaintyExplainer:
                 coefficients[i, feat_idx] = coef
 
         return LIMEExplanation(
-            scope=self.scope,
             feature_names=fnames,
             local_coefficients=coefficients,
             metric=self.metric,

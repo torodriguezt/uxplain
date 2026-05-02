@@ -189,47 +189,31 @@ class TestExplainPDP:
 # ---------------------------------------------------------------------------
 
 class TestExplainLIME:
-    def test_local_returns_explanation_result(self, data):
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
+    def test_returns_explanation_result(self, data):
+        pipeline = _make_pipeline(xai_method="lime", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
         result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert isinstance(result, ExplanationResult)
 
-    def test_local_explanation_values_type(self, data):
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
+    def test_explanation_values_type(self, data):
+        pipeline = _make_pipeline(xai_method="lime", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
         result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert isinstance(result.explanation_values, LIMEExplanation)
-        assert result.explanation_values.scope == "local"
-
-    def test_global_scope(self, data):
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="global", n_lime_samples=50)
-        pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain(data["X_test"][:3], show_plots=False)
-        assert result.explanation_values.scope == "global"
 
     def test_local_coefficients_shape(self, data):
         n_features = data["X_test"].shape[1]
         X_small = data["X_test"][:3]
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
+        pipeline = _make_pipeline(xai_method="lime", n_lime_samples=50)
         pipeline.fit(data["X_train"], data["y_train"])
         result = pipeline.explain(X_small, show_plots=False)
         exp = result.explanation_values
         assert exp.local_coefficients.shape == (len(X_small), n_features)
-        assert exp.global_importance.shape == (n_features,)
-
-    def test_global_importance_is_mean_abs_local(self, data):
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
-        pipeline.fit(data["X_train"], data["y_train"])
-        result = pipeline.explain(data["X_test"][:3], show_plots=False)
-        exp = result.explanation_values
-        expected = np.mean(np.abs(exp.local_coefficients), axis=0)
-        np.testing.assert_allclose(exp.global_importance, expected)
 
     def test_feature_names_propagated(self, data):
         cols = ["a", "b", "c", "d"]
         X_df = pd.DataFrame(data["X_train"], columns=cols)
-        pipeline = _make_pipeline(xai_method="lime", lime_scope="local", n_lime_samples=50)
+        pipeline = _make_pipeline(xai_method="lime", n_lime_samples=50)
         pipeline.fit(X_df, data["y_train"])
         result = pipeline.explain(data["X_test"][:2], show_plots=False)
         assert result.explanation_values.feature_names == cols

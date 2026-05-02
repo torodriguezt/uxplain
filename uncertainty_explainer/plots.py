@@ -128,10 +128,8 @@ def generate_lime_plots(
         Which plots to generate. Options:
 
         - ``"local"``  — LIME coefficients for a single sample
-        - ``"global"`` — mean absolute importance across all samples
 
-        Defaults to ``["local"]`` when ``explanation.scope == "local"``
-        and ``["local", "global"]`` when ``scope == "global"``.
+        Defaults to ``["local"]``.
 
     sample_index : int
         Sample row to highlight in the ``"local"`` plot.
@@ -146,7 +144,7 @@ def generate_lime_plots(
     """
 
     if kinds is None:
-        kinds = ["local", "global"] if explanation.scope == "global" else ["local"]
+        kinds = ["local"]
 
     if sample_index is None:
         sample_index = 0
@@ -172,23 +170,6 @@ def generate_lime_plots(
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["local"] = fig
-
-    # --- Global ---
-    if "global" in kinds:
-        importance = explanation.global_importance
-        order = np.argsort(importance)
-        labels = [fnames[i] for i in order]
-
-        fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
-        bars = ax.barh(labels, importance[order], color="steelblue")
-        ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
-        ax.set_xlabel(
-            r"Mean $|\text{LIME coefficient}|$ (effect on " + metric_text + ")"
-        )
-        ax.set_title("LIME — Global feature importance")
-        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
-        fig.tight_layout()
-        figures["global"] = fig
 
     if show:
         plt.show()
