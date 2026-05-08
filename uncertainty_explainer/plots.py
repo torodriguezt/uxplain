@@ -1,5 +1,6 @@
 """
-Visualization utilities for SHAP and PDP explanations.
+Visualization utilities for SHAP, PDP, LIME, and conformal-classification
+explanations.
 """
 
 from __future__ import annotations
@@ -343,6 +344,125 @@ def generate_pdp_plots(
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["importance"] = fig
+
+    if show:
+        plt.show()
+
+    return figures
+
+
+def generate_classification_plots(
+    result,
+    kinds: List[str] | None = None,
+    sample_index: int = 0,
+    show: bool = True,
+) -> dict:
+    """
+    Generate plots specific to conformal classification output.
+
+    Operates on the conformal output (prediction sets, p-values), not
+    on the explainer output. The XAI explainer plots
+    (``generate_default_plots``, ``generate_pdp_plots``,
+    ``generate_lime_plots``) work unchanged for classification because
+    they explain a scalar uncertainty metric.
+
+    Parameters
+    ----------
+    result : ClassificationExplanationResult
+        Output of ``UncertaintyExplanationPipeline.explain()`` when
+        ``task="classification"``.
+
+    kinds : list of str, optional
+        Which plots to generate. Options:
+
+        - ``"set_size"``       — histogram of prediction set sizes
+        - ``"p_values"``       — bar chart of p-values per class for one sample
+        - ``"set_membership"`` — heatmap of set membership across samples x classes
+
+        Defaults to ``["set_size", "p_values"]``.
+
+    sample_index : int
+        Sample row to highlight in the ``"p_values"`` plot.
+
+    show : bool
+        Whether to call ``plt.show()``.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping plot kind to matplotlib figure.
+    """
+
+    if kinds is None:
+        kinds = ["set_size", "p_values"]
+
+    classes = np.asarray(result.classes)
+    class_labels = [str(c) for c in classes]
+    figures = {}
+
+    # --- Set-size distribution ---
+    if "set_size" in kinds:
+        sizes = np.asarray(result.set_size).astype(int)
+        max_size = int(sizes.max()) if len(sizes) else 0
+        bins = np.arange(0, max_size + 2) - 0.5
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        counts, _, patches = ax.hist(sizes, bins=bins, color="steelblue",
+                                     edgecolor="white")
+        ax.set_xticks(np.arange(0, max_size + 1))
+        ax.set_xlabel("Prediction set size")
+        ax.set_ylabel("Number of samples")
+        mean_size = float(sizes.mean()) if len(sizes) else 0.0
+        ax.set_title(
+            f"Prediction set size distribution (mean = {mean_size:.2f})"
+        )
+        ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+        for count, patch in zip(counts, patches):
+            if count > 0:
+                ax.text(
+                    patch.get_x() + patch.get_width() / 2,
+                    count,
+                    f"{int(count)}",
+                    ha="center", va="bottom", fontsize=8,
+                )
+        fig.tight_layout()
+        figures["set_size"] = fig
+
+    # --- P-values per class for a single sample ---
+    if "p_values" in kinds:
+        p_row = np.asarray(result.p_values)[sample_index]
+        in_set = np.asarray(result.prediction_set)[sample_index]
+        colors = ["tomato" if inc else "lightgray" for inc in in_set]
+
+        fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * len(classes))))
+        bars = ax.barh(class_labels, p_row, color=colors,
+                       edgecolor="black", linewidth=0.5)
+        ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8)
+        ax.set_xlabel("Conformal p-value")
+        ax.set_ylabel("Class")
+        ax.set_title(
+            f"P-values per class (sample {sample_index}) — "
+            f"red = in prediction set"
+        )
+        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+        fig.tight_layout()
+        figures["p_values"] = fig
+
+    # --- Set membership heatmap ---
+    if "set_membership" in kinds:
+        membership = np.asarray(result.prediction_set).astype(int)
+        fig, ax = plt.subplots(figsize=(max(4, 0.3 * len(classes)),
+                                         max(3, 0.15 * membership.shape[0])))
+        im = ax.imshow(membership, aspect="auto", cmap="RdYlBu_r",
+                       interpolation="nearest", vmin=0, vmax=1)
+        ax.set_xticks(np.arange(len(classes)))
+        ax.set_xticklabels(class_labels, rotation=45, ha="right")
+        ax.set_xlabel("Class")
+        ax.set_ylabel("Sample index")
+        ax.set_title("Prediction set membership (1 = in set)")
+        fig.colorbar(im, ax=ax, ticks=[0, 1])
+        fig.tight_layout()
+        figures["set_membership"] = fig
 
     if show:
         plt.show()

@@ -1,4 +1,7 @@
 from uncertainty_explainer.conformal.cqr_predictor import CQRConformalPredictor
+from uncertainty_explainer.conformal.crepes_classifier import (
+    CrepesConformalClassifier,
+)
 from uncertainty_explainer.conformal.crepes_predictor import CrepesConformalPredictor
 from uncertainty_explainer.explainability.lime_explainer import (
     LIMEExplanation,
@@ -14,13 +17,16 @@ from uncertainty_explainer.protocols import (
     UncertaintyExplainerProtocol,
 )
 from uncertainty_explainer.uq_explainer import (
+    ClassificationExplanationResult,
     ExplanationResult,
     UncertaintyExplanationPipeline,
 )
 
 __all__ = [
+    "ClassificationExplanationResult",
     "ConformalPredictorProtocol",
     "CQRConformalPredictor",
+    "CrepesConformalClassifier",
     "CrepesConformalPredictor",
     "ExplanationResult",
     "LIMEExplanation",

@@ -2,15 +2,26 @@
 Uncertainty metrics for conformal prediction.
 
 These functions define scalar measures derived from a conformal predictor's
-output ``(lower, upper)`` that can serve as the *target* of an explainer.
-The default is the interval width — the most common notion of how
-uncertain a prediction is — but explaining the lower bound, upper bound,
-or midpoint is sometimes more informative:
+output that can serve as the *target* of an explainer.
+
+Regression metrics reduce ``(lower, upper)`` to a single scalar:
 
 - ``"width"``    : ``upper - lower``           (how wide the interval is)
 - ``"lower"``    : ``lower``                   (the pessimistic prediction)
 - ``"upper"``    : ``upper``                   (the optimistic prediction)
 - ``"midpoint"`` : ``(lower + upper) / 2``     (the central prediction)
+
+Classification metrics reduce ``(predict_set, predict_p, predict_proba)``
+to a single scalar per sample:
+
+- ``"set_size"``    : number of classes in the prediction set
+                     (analogue of ``"width"``: ↑ = more uncertain)
+- ``"credibility"`` : highest p-value across classes
+                     (how compatible the most-likely class is with calibration)
+- ``"confidence"``  : ``1 − second-highest p-value``
+                     (how confidently we reject the runner-up class)
+- ``"margin"``      : ``top1_proba − top2_proba``
+                     (gap between the top two predicted probabilities)
 """
 
 from __future__ import annotations
@@ -19,7 +30,12 @@ from typing import Callable, Literal
 
 import numpy as np
 
-UncertaintyMetric = Literal["width", "lower", "upper", "midpoint"]
+RegressionMetric = Literal["width", "lower", "upper", "midpoint"]
+ClassificationMetric = Literal["set_size", "credibility", "confidence", "margin"]
+UncertaintyMetric = Literal[
+    "width", "lower", "upper", "midpoint",
+    "set_size", "credibility", "confidence", "margin",
+]
 
 
 METRIC_LABELS: dict[str, str] = {
@@ -27,10 +43,16 @@ METRIC_LABELS: dict[str, str] = {
     "lower": "Lower bound",
     "upper": "Upper bound",
     "midpoint": "Interval midpoint",
+    "set_size": "Prediction set size",
+    "credibility": "Credibility (max p-value)",
+    "confidence": "Confidence (1 − 2nd p-value)",
+    "margin": "Top-1 minus top-2 probability margin",
 }
 
 
-_METRIC_FUNCTIONS: dict[str, Callable[[np.ndarray, np.ndarray], np.ndarray]] = {
+_REGRESSION_REDUCERS: dict[
+    str, Callable[[np.ndarray, np.ndarray], np.ndarray]
+] = {
     "width": lambda lower, upper: upper - lower,
     "lower": lambda lower, _upper: lower,
     "upper": lambda _lower, upper: upper,
@@ -38,26 +60,46 @@ _METRIC_FUNCTIONS: dict[str, Callable[[np.ndarray, np.ndarray], np.ndarray]] = {
 }
 
 
+def _set_size(cp, X: np.ndarray, confidence: float) -> np.ndarray:
+    return cp.predict_set(X, confidence=confidence).sum(axis=1).astype(float)
+
+
+def _credibility(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
+    return cp.predict_p(X).max(axis=1)
+
+
+def _conformal_confidence(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
+    p = np.sort(cp.predict_p(X), axis=1)
+    # 1 - second-highest p-value (well-defined for n_classes >= 2)
+    return 1.0 - p[:, -2]
+
+
+def _margin(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
+    proba = np.sort(cp.predict_proba(X), axis=1)
+    return proba[:, -1] - proba[:, -2]
+
+
+_CLASSIFICATION_REDUCERS: dict[
+    str, Callable[[object, np.ndarray, float], np.ndarray]
+] = {
+    "set_size": _set_size,
+    "credibility": _credibility,
+    "confidence": _conformal_confidence,
+    "margin": _margin,
+}
+
+
+def is_classifier_predictor(cp) -> bool:
+    """Return True if ``cp`` exposes the conformal-classifier interface."""
+
+    return hasattr(cp, "predict_set") and hasattr(cp, "predict_p")
+
+
 def interval_width(
     lower: np.ndarray,
     upper: np.ndarray,
 ) -> np.ndarray:
-    """
-    Compute interval width.
-
-    Parameters
-    ----------
-    lower : np.ndarray
-        Lower prediction bounds.
-
-    upper : np.ndarray
-        Upper prediction bounds.
-
-    Returns
-    -------
-    np.ndarray
-        Interval widths.
-    """
+    """Compute interval width."""
 
     return upper - lower
 
@@ -81,18 +123,19 @@ def make_uncertainty_function(
     """
     Create a callable ``X -> uncertainty_metric(X)`` for an explainer.
 
-    The returned function calls the conformal predictor and reduces its
-    ``(lower, upper)`` output to a single scalar per sample according to
-    ``metric``.
+    Dispatches between regression and classification reducers based on
+    the conformal predictor's interface (presence of ``predict_set``).
 
     Parameters
     ----------
     conformal_predictor
-        Fitted conformal predictor.
+        Fitted conformal predictor (regressor or classifier).
     confidence : float
-        Nominal coverage level passed to ``conformal_predictor.predict``.
-    metric : {"width", "lower", "upper", "midpoint"}
-        Which scalar to return for each sample.
+        Nominal coverage level passed to the conformal predictor.
+    metric : str
+        - Regression: ``"width"``, ``"lower"``, ``"upper"``, ``"midpoint"``
+        - Classification: ``"set_size"``, ``"credibility"``,
+          ``"confidence"``, ``"margin"``
 
     Returns
     -------
@@ -100,20 +143,33 @@ def make_uncertainty_function(
         Function ``f(X) -> np.ndarray`` of shape ``(n_samples,)``.
     """
 
-    if metric not in _METRIC_FUNCTIONS:
+    if is_classifier_predictor(conformal_predictor):
+        if metric not in _CLASSIFICATION_REDUCERS:
+            raise ValueError(
+                f"Metric '{metric}' is not valid for classification. "
+                f"Choose from {list(_CLASSIFICATION_REDUCERS)}."
+            )
+        reducer = _CLASSIFICATION_REDUCERS[metric]
+
+        def uncertainty_function(X: np.ndarray) -> np.ndarray:
+            return reducer(conformal_predictor, X, confidence)
+
+        return uncertainty_function
+
+    if metric not in _REGRESSION_REDUCERS:
         raise ValueError(
-            f"Unknown uncertainty metric '{metric}'. "
-            f"Choose from {list(_METRIC_FUNCTIONS)}."
+            f"Metric '{metric}' is not valid for regression. "
+            f"Choose from {list(_REGRESSION_REDUCERS)}."
         )
 
-    reducer = _METRIC_FUNCTIONS[metric]
+    reducer_reg = _REGRESSION_REDUCERS[metric]
 
     def uncertainty_function(X: np.ndarray) -> np.ndarray:
         lower, upper = conformal_predictor.predict(
             X,
             confidence=confidence,
         )
-        return reducer(lower, upper)
+        return reducer_reg(lower, upper)
 
     return uncertainty_function
 

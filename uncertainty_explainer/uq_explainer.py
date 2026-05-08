@@ -8,9 +8,14 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
+from sklearn.base import is_classifier
 from sklearn.model_selection import train_test_split
 
 from .conformal.cqr_predictor import CQRConformalPredictor
+from .conformal.crepes_classifier import (
+    ClassificationConformalMethod,
+    CrepesConformalClassifier,
+)
 from .conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
@@ -18,23 +23,36 @@ from .conformal.crepes_predictor import (
 from .explainability.lime_explainer import LimeUncertaintyExplainer
 from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.shap_explainer import ShapUncertaintyExplainer
-from .plots import generate_default_plots, generate_lime_plots, generate_pdp_plots
+from .plots import (
+    generate_classification_plots,
+    generate_default_plots,
+    generate_lime_plots,
+    generate_pdp_plots,
+)
 from .protocols import (
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
-from .uncertainty.metrics import UncertaintyMetric
+from .uncertainty.metrics import (
+    UncertaintyMetric,
+    is_classifier_predictor,
+)
 
 XAIMethod = Literal["shap", "pdp", "lime"]
+TaskKind = Literal["auto", "regression", "classification"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
 VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance", "pdp_2d")
-VALID_LIME_PLOT_KINDS = ("local")
+VALID_LIME_PLOT_KINDS = ("local",)
+VALID_CLASSIFICATION_PLOT_KINDS = ("set_size", "p_values", "set_membership")
+
+REGRESSION_METRICS = ("width", "lower", "upper", "midpoint")
+CLASSIFICATION_METRICS = ("set_size", "credibility", "confidence", "margin")
 
 
 @dataclass
 class ExplanationResult:
-    """Result of explain().
+    """Result of explain() for regression.
 
     Attributes
     ----------
@@ -54,24 +72,97 @@ class ExplanationResult:
     explanation_values: Any
 
 
+@dataclass
+class ClassificationExplanationResult:
+    """Result of explain() for classification.
+
+    Attributes
+    ----------
+    prediction_set : np.ndarray of shape (n_samples, n_classes), dtype=bool
+        Conformal prediction sets — True at ``[i, k]`` means class ``k``
+        is included in the set for sample ``i``.
+    p_values : np.ndarray of shape (n_samples, n_classes)
+        Conformal p-values per class.
+    set_size : np.ndarray of shape (n_samples,)
+        Size of the prediction set for each sample.
+    classes : np.ndarray of shape (n_classes,)
+        Class labels in the order used by ``prediction_set`` and ``p_values``.
+    explanation_values : Any
+        Explainer output (shap.Explanation, LIMEExplanation, PDPExplanation).
+    """
+
+    prediction_set: np.ndarray
+    p_values: np.ndarray
+    set_size: np.ndarray
+    classes: np.ndarray
+    explanation_values: Any
+
+
+def _detect_task(
+    model,
+    conformal_predictor,
+    task: TaskKind,
+) -> Literal["regression", "classification"]:
+    """Resolve ``task="auto"`` from the model / predictor."""
+
+    if task != "auto":
+        return task
+    if conformal_predictor is not None:
+        return (
+            "classification" if is_classifier_predictor(conformal_predictor)
+            else "regression"
+        )
+    if model is not None and is_classifier(model):
+        return "classification"
+    return "regression"
+
+
 class UncertaintyExplanationPipeline:
     """
     Pipeline integrating conformal prediction and uncertainty explanation.
 
-    Supports three XAI methods selectable via ``xai_method``:
+    Supports both regression and classification (selected via ``task``).
+
+    Three XAI methods are available, selectable via ``xai_method``:
 
     - ``"shap"`` — SHAP-based explanation (default)
     - ``"pdp"``  — Partial Dependence Plot explanation
-    - ``"lime"`` — LIME-based explanation 
+    - ``"lime"`` — LIME-based explanation
+
+    Examples
+    --------
+    Regression::
+
+        from sklearn.ensemble import RandomForestRegressor
+        pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
+        pipeline.fit(X_train, y_train)
+        result = pipeline.explain(X_test)
+
+    Classification::
+
+        from sklearn.ensemble import RandomForestClassifier
+        pipeline = UncertaintyExplanationPipeline(
+            model=RandomForestClassifier(),
+            task="classification",
+            uncertainty_metric="set_size",
+        )
+        pipeline.fit(X_train, y_train)
+        result = pipeline.explain(X_test)
+        print(result.prediction_set)   # (n, n_classes) bool
+        print(result.set_size)         # (n,)
     """
 
     def __init__(
         self,
         model=None,
         confidence: float = 0.9,
-        conformal_method: ConformalMethod | Literal["cqr"] = "normalized",
+        task: TaskKind = "auto",
+        conformal_method: (
+            ConformalMethod | ClassificationConformalMethod | Literal["cqr"]
+            | None
+        ) = None,
         xai_method: XAIMethod = "shap",
-        uncertainty_metric: UncertaintyMetric = "width",
+        uncertainty_metric: UncertaintyMetric | None = None,
         n_lime_samples: int = 5000,
         random_state: int | None = None,
         lower_model=None,
@@ -85,71 +176,100 @@ class UncertaintyExplanationPipeline:
         Parameters
         ----------
         model
-            sklearn-compatible regressor. Required for crepes methods.
-            Ignored when ``conformal_method="cqr"`` or when a custom
+            sklearn-compatible regressor or classifier. Required for crepes
+            methods. Ignored when ``conformal_method="cqr"`` or when a custom
             ``conformal_predictor`` is provided.
 
         confidence : float
 
-        conformal_method : str
-            Conformal prediction method. One of ``"standard"``,
-            ``"normalized"``, ``"mondrian"``, ``"normalized_mondrian"``
-            (crepes-based), or ``"cqr"`` (Conformalized Quantile Regression).
+        task : {"auto", "regression", "classification"}
+            Task type. ``"auto"`` infers from the model / conformal_predictor.
+
+        conformal_method : str, optional
+            Conformal method.
+
+            - Regression: ``"standard"``, ``"normalized"`` (default),
+              ``"mondrian"``, ``"normalized_mondrian"`` (crepes), or ``"cqr"``.
+            - Classification: ``"standard"`` (default), ``"class_cond"``,
+              ``"mondrian"``.
+
             Ignored if ``conformal_predictor`` is provided.
 
         xai_method : {"shap", "pdp", "lime"}
-            Explainability method to use. Ignored if ``explainer``
-            is provided.
+            Explainability method to use. Ignored if ``explainer`` is provided.
 
-        uncertainty_metric : {"width", "lower", "upper", "midpoint"}
-            Which scalar function of the conformal interval to explain:
+        uncertainty_metric : str, optional
+            Which scalar to explain. Defaults depend on ``task``:
 
-            - ``"width"``    — interval width ``upper - lower`` (default;
-              "how uncertain is the prediction").
-            - ``"lower"``    — lower bound (drivers of the pessimistic
-              prediction).
-            - ``"upper"``    — upper bound (drivers of the optimistic
-              prediction).
-            - ``"midpoint"`` — ``(lower + upper) / 2`` (drivers of the
-              central prediction).
+            - Regression: ``"width"`` (interval width).
+              Other options: ``"lower"``, ``"upper"``, ``"midpoint"``.
+            - Classification: ``"set_size"`` (size of prediction set).
+              Other options: ``"credibility"``, ``"confidence"``, ``"margin"``.
 
             Ignored if ``explainer`` is provided.
 
         n_lime_samples : int
-            Number of perturbations per sample used by LIME.
-            Higher values give more stable coefficients at the cost
-            of speed. Ignored when ``xai_method != "lime"``.
+            Number of LIME perturbations per sample. Ignored when
+            ``xai_method != "lime"``.
 
         random_state : int, optional
-            Seed used for stochastic steps: the auto calibration
-            split in ``fit()`` and, when ``xai_method="lime"``, the
-            LIME perturbation sampler.
-        lower_model
-            Quantile regressor for the lower bound, e.g.
-            ``GradientBoostingRegressor(loss="quantile", alpha=0.05)``.
-            Required when ``conformal_method="cqr"``.
+            Seed for the auto calibration split and LIME perturbation sampler.
 
-        upper_model
-            Quantile regressor for the upper bound, e.g.
-            ``GradientBoostingRegressor(loss="quantile", alpha=0.95)``.
-            Required when ``conformal_method="cqr"``.
+        lower_model, upper_model
+            Quantile regressors for CQR. Required when
+            ``conformal_method="cqr"`` (regression only).
 
-        conformal_predictor : ConformalPredictorProtocol, optional
-            Custom conformal predictor. Overrides ``conformal_method``
-            when provided.
+        conformal_predictor : optional
+            Custom conformal predictor (regressor or classifier). Overrides
+            ``conformal_method`` when provided.
 
-        explainer : UncertaintyExplainerProtocol, optional
-            Custom explainer instance. Overrides ``xai_method``
-            when provided.
+        explainer : optional
+            Custom explainer instance. Overrides ``xai_method`` when provided.
         """
 
         self.confidence = confidence
         self.xai_method = xai_method
-        self.uncertainty_metric = uncertainty_metric
         self.random_state = random_state
 
+        # Resolve task
+        self.task = _detect_task(model, conformal_predictor, task)
+
+        # Resolve metric default per task
+        if uncertainty_metric is None:
+            uncertainty_metric = (
+                "set_size" if self.task == "classification" else "width"
+            )
+        self._validate_metric(uncertainty_metric, self.task)
+        self.uncertainty_metric = uncertainty_metric
+
+        # Resolve conformal method default per task
+        if conformal_method is None:
+            conformal_method = (
+                "standard" if self.task == "classification" else "normalized"
+            )
+
+        # Build conformal predictor
         if conformal_predictor is not None:
             self.cp = conformal_predictor
+        elif self.task == "classification":
+            if model is None:
+                raise ValueError(
+                    "task='classification' requires a 'model' (sklearn-"
+                    "compatible classifier with predict_proba) or a custom "
+                    "'conformal_predictor'."
+                )
+            if conformal_method not in (
+                "standard", "class_cond", "mondrian"
+            ):
+                raise ValueError(
+                    f"conformal_method='{conformal_method}' is not valid for "
+                    "classification. Choose from 'standard', 'class_cond', "
+                    "'mondrian'."
+                )
+            self.cp = CrepesConformalClassifier(
+                model,
+                method=conformal_method,
+            )
         elif conformal_method == "cqr":
             if lower_model is None or upper_model is None:
                 raise ValueError(
@@ -165,22 +285,25 @@ class UncertaintyExplanationPipeline:
         else:
             raise ValueError(
                 "Either 'model' or 'conformal_predictor' must be provided, "
-                "or set conformal_method='cqr' with 'lower_model' and 'upper_model'."
+                "or set conformal_method='cqr' with 'lower_model' and "
+                "'upper_model'."
             )
 
+        # Build explainer (regression and classification share the same
+        # explainers — they both consume a scalar uncertainty function)
         if explainer is not None:
             self.explainer = explainer
         elif xai_method == "pdp":
             self.explainer = PDPUncertaintyExplainer(
                 cp=self.cp,
                 confidence=self.confidence,
-                metric=uncertainty_metric,
+                metric=self.uncertainty_metric,
             )
         elif xai_method == "shap":
             self.explainer = ShapUncertaintyExplainer(
                 cp=self.cp,
                 confidence=self.confidence,
-                metric=uncertainty_metric,
+                metric=self.uncertainty_metric,
             )
         elif xai_method == "lime":
             self.explainer = LimeUncertaintyExplainer(
@@ -188,7 +311,7 @@ class UncertaintyExplanationPipeline:
                 confidence=self.confidence,
                 n_lime_samples=n_lime_samples,
                 random_state=random_state,
-                metric=uncertainty_metric,
+                metric=self.uncertainty_metric,
             )
         else:
             raise ValueError(
@@ -223,14 +346,13 @@ class UncertaintyExplanationPipeline:
         X_calib : np.ndarray or DataFrame, optional
         y_calib : np.ndarray or Series, optional
         calib_size : float
-            Fraction of X_train to use for calibration
-            when X_calib is not provided.
+            Fraction of X_train to use for calibration when X_calib is not
+            provided.
         X_background : np.ndarray, optional
-            Background data for the explainer (SHAP, PDP, or LIME).
-            Defaults to X_calib.
+            Background data for the explainer. Defaults to X_calib.
         random_state : int, optional
-            Seed for the auto calibration split. Overrides the
-            pipeline-level ``random_state`` for this call only.
+            Seed for the auto calibration split. Overrides the pipeline-level
+            ``random_state`` for this call only.
         """
 
         # Extract feature names from DataFrame before converting
@@ -246,12 +368,15 @@ class UncertaintyExplanationPipeline:
         if y_calib is not None:
             y_calib = np.asarray(y_calib)
 
-        # Auto-split if calibration set not provided
+        # Auto-split if calibration set not provided.
+        # Stratify on y for classification to avoid missing classes in calib.
         if X_calib is None or y_calib is None:
             seed = random_state if random_state is not None else self.random_state
+            stratify = y_train if self.task == "classification" else None
             X_train, X_calib, y_train, y_calib = train_test_split(
                 X_train, y_train, test_size=calib_size,
                 random_state=seed,
+                stratify=stratify,
             )
 
         # Strip feature names before fitting. SHAP/LIME later call predict()
@@ -280,29 +405,28 @@ class UncertaintyExplanationPipeline:
         self,
         X,
         confidence: float | None = None,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ):
         """
-        Generate prediction intervals.
-
-        Parameters
-        ----------
-        X : np.ndarray
-        confidence : float, optional
-            Overrides the pipeline default if provided.
+        Generate conformal predictions.
 
         Returns
         -------
-        lower : np.ndarray
-        upper : np.ndarray
+        Regression
+            ``(lower, upper)`` — tuple of arrays.
+        Classification
+            ``prediction_set`` — array of shape ``(n_samples, n_classes)``,
+            dtype=bool.
         """
 
         self._check_is_fitted()
         self._check_X(X)
 
-        return self.cp.predict(
-            np.asarray(X),
-            confidence=self.confidence if confidence is None else confidence,
-        )
+        conf = self.confidence if confidence is None else confidence
+        X_arr = np.asarray(X)
+
+        if self.task == "classification":
+            return self.cp.predict_set(X_arr, confidence=conf)
+        return self.cp.predict(X_arr, confidence=conf)
 
     def explain(
         self,
@@ -311,9 +435,9 @@ class UncertaintyExplanationPipeline:
         plot_kind: str | list[str] | None = None,
         waterfall_index: int | None = None,
         **explainer_kwargs,
-    ) -> ExplanationResult:
+    ):
         """
-        Explain interval width uncertainty.
+        Explain uncertainty for X.
 
         Parameters
         ----------
@@ -322,16 +446,19 @@ class UncertaintyExplanationPipeline:
             Whether to display plots.
         plot_kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
-            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
-            For LIME: ``"local"``, ``"global"``.
+            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``,
+                       ``"pdp_2d"``.
+            For LIME: ``"local"``.
             Defaults to method-specific defaults when ``None``.
         waterfall_index : int
-            Sample index for SHAP waterfall plot.
+            Sample index for SHAP waterfall plot or LIME local plot.
         **explainer_kwargs
             Passed to explainer.fit().
-            For SHAP: ``algorithm="auto"|"permutation"|...``
-            For PDP:  ``kind="average"|"individual"|"both"``,
-            ``grid_resolution``, ``percentiles``, ``features``.
+
+        Returns
+        -------
+        ExplanationResult or ClassificationExplanationResult
+            Depending on ``self.task``.
         """
 
         self._check_is_fitted()
@@ -362,10 +489,30 @@ class UncertaintyExplanationPipeline:
 
         explanation_values = self.explainer.explain(X)
 
-        lower, upper = self.cp.predict(
-            X, confidence=self.confidence
-        )
-        width = upper - lower
+        X_arr = np.asarray(X)
+
+        if self.task == "classification":
+            prediction_set = self.cp.predict_set(X_arr, confidence=self.confidence)
+            p_values = self.cp.predict_p(X_arr)
+            set_size = prediction_set.sum(axis=1)
+            classes = np.asarray(self.cp.classes_)
+
+            result = ClassificationExplanationResult(
+                prediction_set=prediction_set,
+                p_values=p_values,
+                set_size=set_size,
+                classes=classes,
+                explanation_values=explanation_values,
+            )
+        else:
+            lower, upper = self.cp.predict(X_arr, confidence=self.confidence)
+            width = upper - lower
+            result = ExplanationResult(
+                lower=lower,
+                upper=upper,
+                interval_width=width,
+                explanation_values=explanation_values,
+            )
 
         if show_plots:
             self.plot(
@@ -373,14 +520,10 @@ class UncertaintyExplanationPipeline:
                 X=X,
                 kind=plot_kind,
                 waterfall_index=waterfall_index,
+                result=result,
             )
 
-        return ExplanationResult(
-            lower=lower,
-            upper=upper,
-            interval_width=width,
-            explanation_values=explanation_values,
-        )
+        return result
 
     explain_uncertainty = explain
 
@@ -390,23 +533,14 @@ class UncertaintyExplanationPipeline:
         X=None,
         kind: str | list[str] | None = None,
         waterfall_index: int | None = None,
+        result=None,
     ):
         """
         Generate plot(s) from existing explanation results.
 
-        Parameters
-        ----------
-        explanation_values
-            Output of ``explain().explanation_values``.
-        X : np.ndarray, optional
-            Required for SHAP ``"summary"`` plot.
-        kind : str or list of str, optional
-            For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
-            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``.
-            For LIME: ``"local"``, ``"global"``.
-            Defaults to method-specific defaults when ``None``.
-        waterfall_index : int
-            Sample index for SHAP waterfall plot.
+        For classification, classification-specific plots (set size
+        distribution, p-values per class) are generated alongside the
+        explainer plots when ``result`` is a ``ClassificationExplanationResult``.
         """
 
         kinds = self._resolve_plot_kinds(kind, X=X)
@@ -430,6 +564,27 @@ class UncertaintyExplanationPipeline:
                 kinds=kinds,
                 feature_names=self._feature_names,
                 waterfall_index=waterfall_index,
+            )
+
+        if (
+            self.task == "classification"
+            and isinstance(result, ClassificationExplanationResult)
+        ):
+            generate_classification_plots(
+                result,
+                sample_index=waterfall_index or 0,
+            )
+
+    def _validate_metric(self, metric, task):
+        if task == "classification" and metric not in CLASSIFICATION_METRICS:
+            raise ValueError(
+                f"uncertainty_metric='{metric}' is not valid for "
+                f"classification. Choose from {CLASSIFICATION_METRICS}."
+            )
+        if task == "regression" and metric not in REGRESSION_METRICS:
+            raise ValueError(
+                f"uncertainty_metric='{metric}' is not valid for "
+                f"regression. Choose from {REGRESSION_METRICS}."
             )
 
     def _check_is_fitted(self):
