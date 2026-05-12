@@ -36,9 +36,11 @@ class PDPExplanation:
 
     Attributes
     ----------
-    values : np.ndarray, shape (n_features, grid_resolution)
+    values : list of np.ndarray
         Averaged PDP values per feature (the marginal effect on
-        interval width across the grid).
+        interval width across the grid). One 1D array per feature;
+        lengths may differ because sklearn caps the grid at the
+        number of unique values (e.g. categorical features).
 
     grid_values : list of np.ndarray
         Grid points used for each feature.
@@ -54,7 +56,7 @@ class PDPExplanation:
         Only present when ``kind="individual"`` or ``kind="both"``.
     """
 
-    values: np.ndarray
+    values: List[np.ndarray]
     grid_values: List[np.ndarray]
     features: List[int]
     kind: str = field(default="average")
@@ -298,7 +300,7 @@ class PDPUncertaintyExplainer:
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
 
         explanation = PDPExplanation(
-            values=np.array(values) if values else values,
+            values=values,
             grid_values=grid_values,
             features=features_1d,
             kind=self.kind,

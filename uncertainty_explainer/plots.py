@@ -178,6 +178,26 @@ def generate_lime_plots(
     return figures
 
 
+_PDP_KIND_REQUIREMENTS = {
+    "pdp": ("average", "both"),
+    "ice": ("individual", "both"),
+    "pdp_ice": ("both",),
+}
+
+
+def _validate_pdp_kinds(kinds: List[str], explanation_kind: str) -> None:
+    for plot_kind in kinds:
+        allowed = _PDP_KIND_REQUIREMENTS.get(plot_kind)
+        if allowed is None:
+            continue
+        if explanation_kind not in allowed:
+            allowed_str = " or ".join(f'"{k}"' for k in allowed)
+            raise ValueError(
+                f'plot_kind="{plot_kind}" requires the explainer to be fitted '
+                f'with kind={allowed_str}, but got kind="{explanation_kind}".'
+            )
+
+
 def generate_pdp_plots(
     explanation,
     kinds: List[str] | None = None,
@@ -222,6 +242,8 @@ def generate_pdp_plots(
             kinds = ["pdp_ice"] if has_1d else []
         else:
             kinds = ["pdp"] if has_1d else []
+
+    _validate_pdp_kinds(kinds, explanation.kind)
 
     if feature_names is not None:
         explanation.feature_names = feature_names

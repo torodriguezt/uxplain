@@ -47,7 +47,7 @@ VALID_LIME_PLOT_KINDS = ("local",)
 VALID_CLASSIFICATION_PLOT_KINDS = ("set_size", "p_values", "set_membership")
 
 REGRESSION_METRICS = ("width", "lower", "upper", "midpoint")
-CLASSIFICATION_METRICS = ("set_size", "credibility", "confidence", "margin")
+CLASSIFICATION_METRICS = ("set_size", "credibility", "confidence")
 
 
 @dataclass
@@ -181,6 +181,7 @@ class UncertaintyExplanationPipeline:
             ``conformal_predictor`` is provided.
 
         confidence : float
+            Confidence level for conformal prediction 
 
         task : {"auto", "regression", "classification"}
             Task type. ``"auto"`` infers from the model / conformal_predictor.
@@ -204,7 +205,7 @@ class UncertaintyExplanationPipeline:
             - Regression: ``"width"`` (interval width).
               Other options: ``"lower"``, ``"upper"``, ``"midpoint"``.
             - Classification: ``"set_size"`` (size of prediction set).
-              Other options: ``"credibility"``, ``"confidence"``, ``"margin"``.
+              Other options: ``"credibility"``, ``"confidence"``.
 
             Ignored if ``explainer`` is provided.
 

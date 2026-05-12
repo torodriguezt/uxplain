@@ -1,16 +1,22 @@
+import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.linear_model import Ridge
 
 from uncertainty_explainer import (
+    ClassificationExplanationResult,
     CQRConformalPredictor,
     ExplanationResult,
     LIMEExplanation,
     UncertaintyExplanationPipeline,
 )
 from uncertainty_explainer.explainability.pdp_explainer import PDPExplanation
+from uncertainty_explainer.plots import generate_pdp_plots
 import shap
+
+# Avoid blocking plot windows during tests
+matplotlib.use("Agg")
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +179,10 @@ class TestExplainPDP:
         pipeline.fit(data["X_train"], data["y_train"])
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
         exp = result.explanation_values
-        assert exp.values.shape[0] == n_features
+        # values is a list of 1D arrays (one per feature); lengths may vary
+        # for categorical features so we check the outer length, not .shape.
+        assert len(exp.values) == n_features
+        assert all(v.ndim == 1 for v in exp.values)
 
     def test_invalid_plot_kind_raises(self, data):
         pipeline = _make_pipeline(xai_method="pdp")
@@ -225,3 +234,140 @@ class TestExplainLIME:
             pipeline.explain(
                 data["X_test"][:2], show_plots=False, plot_kind="beeswarm"
             )
+
+
+# ---------------------------------------------------------------------------
+# PDP plot_kind / explainer.kind compatibility validation
+# ---------------------------------------------------------------------------
+
+def _fit_pdp_explanation(data, kind: str):
+    """Helper: fit a PDP explainer with the given ``kind`` and return its explanation."""
+    pipeline = _make_pipeline(xai_method="pdp")
+    pipeline.fit(data["X_train"], data["y_train"])
+    pipeline.explainer.fit(data["X_calib"], kind=kind)
+    return pipeline.explainer.explain(data["X_test"][:10])
+
+
+class TestPDPKindValidation:
+    @pytest.mark.parametrize("bad_kind", ["average", "individual"])
+    def test_pdp_ice_requires_both(self, data, bad_kind):
+        explanation = _fit_pdp_explanation(data, kind=bad_kind)
+        with pytest.raises(ValueError, match='plot_kind="pdp_ice"'):
+            generate_pdp_plots(explanation, kinds=["pdp_ice"], show=False)
+
+    def test_ice_requires_individual_or_both(self, data):
+        explanation = _fit_pdp_explanation(data, kind="average")
+        with pytest.raises(ValueError, match='plot_kind="ice"'):
+            generate_pdp_plots(explanation, kinds=["ice"], show=False)
+
+    def test_pdp_requires_average_or_both(self, data):
+        explanation = _fit_pdp_explanation(data, kind="individual")
+        with pytest.raises(ValueError, match='plot_kind="pdp"'):
+            generate_pdp_plots(explanation, kinds=["pdp"], show=False)
+
+    @pytest.mark.parametrize("plot_kind", ["pdp", "ice", "pdp_ice"])
+    def test_kind_both_supports_all_plot_kinds(self, data, plot_kind):
+        explanation = _fit_pdp_explanation(data, kind="both")
+        figs = generate_pdp_plots(explanation, kinds=[plot_kind], show=False)
+        assert plot_kind in figs
+
+    @pytest.mark.parametrize("explainer_kind", ["average", "individual", "both"])
+    def test_importance_works_under_any_kind(self, data, explainer_kind):
+        # Importance uses .values, which is always populated (the explainer
+        # internally requests "both" when kind="individual").
+        explanation = _fit_pdp_explanation(data, kind=explainer_kind)
+        figs = generate_pdp_plots(explanation, kinds=["importance"], show=False)
+        assert "importance" in figs
+
+
+# ---------------------------------------------------------------------------
+# Classification pipeline
+# ---------------------------------------------------------------------------
+
+class TestClassificationPipeline:
+    def test_auto_detects_classification_from_classifier(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(model=classifier)
+        assert pipeline.task == "classification"
+
+    def test_classification_requires_model(self):
+        with pytest.raises(ValueError, match="classification.*requires a 'model'"):
+            UncertaintyExplanationPipeline(task="classification")
+
+    def test_invalid_conformal_method_for_classification(self, classifier):
+        with pytest.raises(ValueError, match="not valid for"):
+            UncertaintyExplanationPipeline(
+                model=classifier,
+                task="classification",
+                conformal_method="normalized",
+            )
+
+    def test_predict_returns_prediction_set(self, classification_data, classifier):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        pred_set = pipeline.predict(classification_data["X_test"])
+        assert pred_set.shape == (
+            len(classification_data["X_test"]),
+            classification_data["n_classes"],
+        )
+        assert pred_set.dtype == bool
+
+    def test_explain_returns_classification_result(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification", xai_method="shap",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        X_small = classification_data["X_test"][:5]
+        result = pipeline.explain(X_small, show_plots=False)
+
+        assert isinstance(result, ClassificationExplanationResult)
+        n = len(X_small)
+        k = classification_data["n_classes"]
+        assert result.prediction_set.shape == (n, k)
+        assert result.prediction_set.dtype == bool
+        assert result.p_values.shape == (n, k)
+        assert result.set_size.shape == (n,)
+        np.testing.assert_array_equal(
+            result.set_size, result.prediction_set.sum(axis=1),
+        )
+        assert result.classes.shape == (k,)
+
+    @pytest.mark.parametrize("xai_method", ["shap", "pdp", "lime"])
+    def test_classification_works_with_each_xai_method(
+        self, classification_data, classifier, xai_method,
+    ):
+        kwargs = {"n_lime_samples": 50} if xai_method == "lime" else {}
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier,
+            task="classification",
+            xai_method=xai_method,
+            **kwargs,
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain(
+            classification_data["X_test"][:5], show_plots=False,
+        )
+        assert isinstance(result, ClassificationExplanationResult)
+        assert result.explanation_values is not None
+
+    def test_default_conformal_method_is_standard(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        assert pipeline.cp.method == "standard"

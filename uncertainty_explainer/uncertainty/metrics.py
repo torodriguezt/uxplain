@@ -20,8 +20,6 @@ to a single scalar per sample:
                      (how compatible the most-likely class is with calibration)
 - ``"confidence"``  : ``1 − second-highest p-value``
                      (how confidently we reject the runner-up class)
-- ``"margin"``      : ``top1_proba − top2_proba``
-                     (gap between the top two predicted probabilities)
 """
 
 from __future__ import annotations
@@ -31,10 +29,10 @@ from typing import Callable, Literal
 import numpy as np
 
 RegressionMetric = Literal["width", "lower", "upper", "midpoint"]
-ClassificationMetric = Literal["set_size", "credibility", "confidence", "margin"]
+ClassificationMetric = Literal["set_size", "credibility", "confidence"]
 UncertaintyMetric = Literal[
     "width", "lower", "upper", "midpoint",
-    "set_size", "credibility", "confidence", "margin",
+    "set_size", "credibility", "confidence",
 ]
 
 
@@ -45,8 +43,7 @@ METRIC_LABELS: dict[str, str] = {
     "midpoint": "Interval midpoint",
     "set_size": "Prediction set size",
     "credibility": "Credibility (max p-value)",
-    "confidence": "Confidence (1 − 2nd p-value)",
-    "margin": "Top-1 minus top-2 probability margin",
+    "confidence": "Confidence (1 - 2nd p-value)",
 }
 
 
@@ -74,18 +71,12 @@ def _conformal_confidence(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
     return 1.0 - p[:, -2]
 
 
-def _margin(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
-    proba = np.sort(cp.predict_proba(X), axis=1)
-    return proba[:, -1] - proba[:, -2]
-
-
 _CLASSIFICATION_REDUCERS: dict[
     str, Callable[[object, np.ndarray, float], np.ndarray]
 ] = {
     "set_size": _set_size,
     "credibility": _credibility,
     "confidence": _conformal_confidence,
-    "margin": _margin,
 }
 
 
@@ -135,7 +126,7 @@ def make_uncertainty_function(
     metric : str
         - Regression: ``"width"``, ``"lower"``, ``"upper"``, ``"midpoint"``
         - Classification: ``"set_size"``, ``"credibility"``,
-          ``"confidence"``, ``"margin"``
+          ``"confidence"``
 
     Returns
     -------
