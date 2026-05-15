@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, prototype]
+    branches: [main, prototype, prototype-classification, feature/classification-support]
   pull_request:
-    branches: [main, prototype]
+    branches: [main, prototype, prototype-classification, feature/classification-support]
 
 jobs:
   lint:
