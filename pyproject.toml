@@ -4,16 +4,36 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "uncertainty_explainer"
-version = "0.0.1"
-description = "Explainability for conformal prediction uncertainty intervals."
+version = "0.1.0"
+description = "Explainability for conformal prediction uncertainty — regression and classification."
 authors = [
-  { name = "Veronica Seguro" },
+  { name = "Veronica Seguro Varela" },
+  { name = "Tomas Rodriguez Taborda" },
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
+keywords = [
+    "conformal prediction",
+    "uncertainty quantification",
+    "explainability",
+    "xai",
+    "shap",
+    "lime",
+    "pdp",
+    "machine learning",
+    "interpretable ml",
+]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License"
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -24,6 +44,11 @@ dependencies = [
     "lime>=0.2",
     "matplotlib>=3.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/vseguro/Uncertainty-Explainer"
+Repository = "https://github.com/vseguro/Uncertainty-Explainer"
+"Bug Tracker" = "https://github.com/vseguro/Uncertainty-Explainer/issues"
 
 [project.optional-dependencies]
 dev = [
