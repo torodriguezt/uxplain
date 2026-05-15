@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from uncertainty_explainer.conformal.cqr_predictor import CQRConformalPredictor
 from uncertainty_explainer.conformal.crepes_classifier import (
     ClassificationConformalMethod,
@@ -33,6 +35,7 @@ from uncertainty_explainer.uq_explainer import (
 )
 
 __all__ = [
+    "__version__",
     "ClassificationConformalMethod",
     "ClassificationExplanationResult",
     "ClassificationMetric",
