@@ -13,8 +13,14 @@ from uncertainty_explainer.explainability.pdp_explainer import (
 )
 from uncertainty_explainer.explainability.shap_explainer import ShapUncertaintyExplainer
 from uncertainty_explainer.protocols import (
+    ConformalClassifierProtocol,
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
+)
+from uncertainty_explainer.uncertainty.metrics import (
+    ClassificationMetric,
+    RegressionMetric,
+    UncertaintyMetric,
 )
 from uncertainty_explainer.uq_explainer import (
     ClassificationExplanationResult,
@@ -24,6 +30,8 @@ from uncertainty_explainer.uq_explainer import (
 
 __all__ = [
     "ClassificationExplanationResult",
+    "ClassificationMetric",
+    "ConformalClassifierProtocol",
     "ConformalPredictorProtocol",
     "CQRConformalPredictor",
     "CrepesConformalClassifier",
@@ -33,7 +41,9 @@ __all__ = [
     "LimeUncertaintyExplainer",
     "PDPExplanation",
     "PDPUncertaintyExplainer",
+    "RegressionMetric",
     "ShapUncertaintyExplainer",
     "UncertaintyExplainerProtocol",
     "UncertaintyExplanationPipeline",
+    "UncertaintyMetric",
 ]
