@@ -371,3 +371,108 @@ class TestClassificationPipeline:
             classification_data["X_train"], classification_data["y_train"],
         )
         assert pipeline.cp.method == "standard"
+
+    @pytest.mark.parametrize("method", ["class_cond", "mondrian"])
+    def test_conformal_method_class_cond_and_mondrian(
+        self, classification_data, classifier, method,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification", conformal_method=method,
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        pred_set = pipeline.predict(classification_data["X_test"])
+        assert pred_set.shape == (
+            len(classification_data["X_test"]),
+            classification_data["n_classes"],
+        )
+
+    def test_classification_auto_calib_stratified(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification", random_state=0,
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            calib_size=0.2,
+        )
+        pred_set = pipeline.predict(classification_data["X_test"])
+        assert pred_set.shape[0] == len(classification_data["X_test"])
+
+    def test_classification_pdp_explanation_values_type(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification", xai_method="pdp",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain(
+            classification_data["X_test"][:5], show_plots=False,
+        )
+        assert isinstance(result, ClassificationExplanationResult)
+        assert isinstance(result.explanation_values, PDPExplanation)
+
+    def test_classification_lime_explanation_values_type(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+            xai_method="lime", n_lime_samples=50,
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain(
+            classification_data["X_test"][:3], show_plots=False,
+        )
+        assert isinstance(result, ClassificationExplanationResult)
+        assert isinstance(result.explanation_values, LIMEExplanation)
+        assert result.explanation_values.local_coefficients.shape == (
+            3, classification_data["X_test"].shape[1],
+        )
+
+    def test_explain_uncertainty_alias(self, classification_data, classifier):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain_uncertainty(
+            classification_data["X_test"][:3], show_plots=False,
+        )
+        assert isinstance(result, ClassificationExplanationResult)
+
+    def test_x_background_parameter(self, data):
+        pipeline = _make_pipeline(xai_method="shap")
+        X_bg = data["X_train"][:20]
+        pipeline.fit(
+            data["X_train"], data["y_train"],
+            data["X_calib"], data["y_calib"],
+            X_background=X_bg,
+        )
+        assert pipeline._X_background.shape == X_bg.shape
+        result = pipeline.explain(data["X_test"][:3], show_plots=False)
+        assert isinstance(result, ExplanationResult)
+
+    def test_pdp_single_sample_raises(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        with pytest.raises(ValueError, match="single-sample"):
+            pipeline.explain(data["X_test"][:1], show_plots=False)
+
+    def test_pdp_2d_requires_tuple_features(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        with pytest.raises(ValueError, match="pdp_2d.*tuple"):
+            pipeline.explain(
+                data["X_test"][:5],
+                show_plots=False,
+                plot_kind="pdp_2d",
+                features=[0, 1],
+            )
