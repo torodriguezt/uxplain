@@ -8,9 +8,9 @@ from uncertainty_explainer import (
 )
 from uncertainty_explainer.plots import (
     generate_classification_plots,
-    generate_default_plots,
     generate_lime_plots,
     generate_pdp_plots,
+    generate_shap_plots,
 )
 
 matplotlib.use("Agg")
@@ -65,7 +65,7 @@ def classification_shap_result(classification_data, classifier):
 class TestGenerateDefaultPlots:
     def test_beeswarm_returns_figure(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["beeswarm"],
@@ -75,7 +75,7 @@ class TestGenerateDefaultPlots:
 
     def test_bar_returns_figure(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["bar"],
@@ -85,7 +85,7 @@ class TestGenerateDefaultPlots:
 
     def test_waterfall_returns_figure(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["waterfall"],
@@ -95,7 +95,7 @@ class TestGenerateDefaultPlots:
 
     def test_summary_returns_figure(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["summary"],
@@ -105,7 +105,7 @@ class TestGenerateDefaultPlots:
 
     def test_all_kinds_together(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["beeswarm", "bar", "waterfall", "summary"],
@@ -115,7 +115,7 @@ class TestGenerateDefaultPlots:
 
     def test_waterfall_index_respected(self, regression_shap_result, data):
         _, result = regression_shap_result
-        figs = generate_default_plots(
+        figs = generate_shap_plots(
             result.explanation_values,
             X=data["X_test"][:5],
             kinds=["waterfall"],

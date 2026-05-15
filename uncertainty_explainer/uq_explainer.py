@@ -25,9 +25,9 @@ from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .plots import (
     generate_classification_plots,
-    generate_default_plots,
     generate_lime_plots,
     generate_pdp_plots,
+    generate_shap_plots,
 )
 from .protocols import (
     ConformalPredictorProtocol,
@@ -561,7 +561,7 @@ class UncertaintyExplanationPipeline:
                 sample_index=waterfall_index,
             )
         else:
-            generate_default_plots(
+            generate_shap_plots(
                 explanation_values,
                 X,
                 kinds=kinds,
