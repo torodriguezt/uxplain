@@ -131,6 +131,6 @@ pytest --cov=uncertainty_explainer   # with coverage report
 ## Authors
 
 - **Veronica Seguro Varela** — MSc student in Statistical Sciences, Universidad Nacional de Colombia, Medellín
-- **Tomas Rodriguez Taborda** — student in Informatics and Computer Science Engineering & Statistics, Universidad Nacional de Colombia, Medellín
+- **Tomas Rodriguez Taborda** — Student in Informatics and Computer Science Engineering & Statistics, Universidad Nacional de Colombia, Medellín
 - **Rafael Izbicki** — PhD, Professor at Federal University of São Carlos, São Carlos
 - **Johnatan Cardona** — PhD, Professor at Universidad Nacional de Colombia, Medellín
