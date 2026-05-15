@@ -1,8 +1,12 @@
 from uncertainty_explainer.conformal.cqr_predictor import CQRConformalPredictor
 from uncertainty_explainer.conformal.crepes_classifier import (
+    ClassificationConformalMethod,
     CrepesConformalClassifier,
 )
-from uncertainty_explainer.conformal.crepes_predictor import CrepesConformalPredictor
+from uncertainty_explainer.conformal.crepes_predictor import (
+    ConformalMethod,
+    CrepesConformalPredictor,
+)
 from uncertainty_explainer.explainability.lime_explainer import (
     LIMEExplanation,
     LimeUncertaintyExplainer,
@@ -29,9 +33,11 @@ from uncertainty_explainer.uq_explainer import (
 )
 
 __all__ = [
+    "ClassificationConformalMethod",
     "ClassificationExplanationResult",
     "ClassificationMetric",
     "ConformalClassifierProtocol",
+    "ConformalMethod",
     "ConformalPredictorProtocol",
     "CQRConformalPredictor",
     "CrepesConformalClassifier",
