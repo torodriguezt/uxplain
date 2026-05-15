@@ -63,6 +63,9 @@ def generate_default_plots(
     if auto_selected:
         waterfall_index = int(np.abs(shap_values.values).sum(axis=1).argmax())
 
+    metric_name = metric_label(getattr(shap_values, "metric", "width"))
+    metric_text = metric_name.lower()
+
     figures = {}
 
     if "summary" in kinds:
@@ -71,8 +74,11 @@ def generate_default_plots(
             shap_values,
             X,
             show=False,
+            rng=np.random.default_rng(0),
         )
-        figures["summary"] = plt.gcf()
+        fig = plt.gcf()
+        fig.suptitle(f"SHAP summary — Uncertainty metric ({metric_text})", y=1.01, fontsize=11)
+        figures["summary"] = fig
 
     if "bar" in kinds:
         plt.figure()
@@ -80,7 +86,9 @@ def generate_default_plots(
             shap_values,
             show=False,
         )
-        figures["bar"] = plt.gcf()
+        fig = plt.gcf()
+        fig.suptitle(f"SHAP bar — Uncertainty metric ({metric_text})", y=1.01, fontsize=11)
+        figures["bar"] = fig
 
     if "beeswarm" in kinds:
         plt.figure()
@@ -88,7 +96,9 @@ def generate_default_plots(
             shap_values,
             show=False,
         )
-        figures["beeswarm"] = plt.gcf()
+        fig = plt.gcf()
+        fig.suptitle(f"SHAP beeswarm — Uncertainty metric ({metric_text})", y=1.01, fontsize=11)
+        figures["beeswarm"] = fig
 
     if "waterfall" in kinds:
         plt.figure()
@@ -97,12 +107,15 @@ def generate_default_plots(
             show=False,
         )
         fig = plt.gcf()
-        title = (
+        sample_label = (
             f"Highest SHAP contribution instance (sample {waterfall_index})"
             if auto_selected
             else f"SHAP waterfall — sample {waterfall_index}"
         )
-        fig.suptitle(title, y=1.01, fontsize=11)
+        fig.suptitle(
+            f"{sample_label} — Uncertainty metric ({metric_text})",
+            y=1.01, fontsize=11,
+        )
         figures["waterfall"] = fig
 
     if show:
@@ -160,14 +173,16 @@ def generate_lime_plots(
         coefs = explanation.local_coefficients[sample_index]
         order = np.argsort(np.abs(coefs))
         labels = [fnames[i] for i in order]
-        colors = ["steelblue" if c >= 0 else "tomato" for c in coefs[order]]
+        colors = ["lightgray" if c >= 0 else "tomato" for c in coefs[order]]
 
         fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
-        bars = ax.barh(labels, coefs[order], color=colors)
+        bars = ax.barh(labels, coefs[order], color=colors, edgecolor="black", linewidth=0.5)
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.axvline(0, color="black", linewidth=0.8)
         ax.set_xlabel(f"LIME coefficient (effect on {metric_text})")
-        ax.set_title(f"LIME — Local explanation (sample {sample_index})")
+        ax.set_title(
+            f"LIME — Local explanation - Uncertainty metric {metric_text}"
+        )
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["local"] = fig
@@ -274,7 +289,7 @@ def generate_pdp_plots(
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle(f"Partial Dependence — Uncertainty ({metric_text})", y=1.01)
+        fig.suptitle(f"Partial Dependence — Uncertainty metric ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["pdp"] = fig
 
@@ -297,7 +312,7 @@ def generate_pdp_plots(
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle(f"ICE — Uncertainty ({metric_text})", y=1.01)
+        fig.suptitle(f"ICE — Uncertainty metric({metric_text})", y=1.01)
         fig.tight_layout()
         figures["ice"] = fig
 
@@ -320,7 +335,7 @@ def generate_pdp_plots(
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle(f"PDP + ICE — Uncertainty ({metric_text})", y=1.01)
+        fig.suptitle(f"PDP + ICE — uncertainty metric ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["pdp_ice"] = fig
 
@@ -345,7 +360,9 @@ def generate_pdp_plots(
             fig.colorbar(filled, ax=ax, label=metric_name)
             ax.set_xlabel(fname_a)
             ax.set_ylabel(fname_b)
-            ax.set_title(f"2D PDP — {fname_a} × {fname_b}")
+            ax.set_title(
+                f"2D PDP — {fname_a} × {fname_b} — uncertainty metric({metric_text})"
+            )
             fig.tight_layout()
             figures[f"pdp_2d_{idx}"] = fig
 
@@ -362,7 +379,7 @@ def generate_pdp_plots(
         bars = ax.barh(labels, importance[order], color="gray")
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.set_xlabel(r"$I(\mathbf{x}_S)$ — std of PDP values")
-        ax.set_title("Feature importance")
+        ax.set_title(f"Feature importance — uncertainty metric ({metric_text})")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["importance"] = fig
@@ -429,8 +446,8 @@ def generate_classification_plots(
         bins = np.arange(0, max_size + 2) - 0.5
 
         fig, ax = plt.subplots(figsize=(6, 4))
-        counts, _, patches = ax.hist(sizes, bins=bins, color="steelblue",
-                                     edgecolor="white")
+        counts, _, patches = ax.hist(sizes, bins=bins, color="salmon",
+                                     edgecolor="black", linewidth=0.5)
         ax.set_xticks(np.arange(0, max_size + 1))
         ax.set_xlabel("Prediction set size")
         ax.set_ylabel("Number of samples")
@@ -463,7 +480,7 @@ def generate_classification_plots(
         ax.set_xlabel("Conformal p-value")
         ax.set_ylabel("Class")
         ax.set_title(
-            f"P-values per class (sample {sample_index}) — "
+            f"P-values per class — "
             f"red = in prediction set"
         )
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)

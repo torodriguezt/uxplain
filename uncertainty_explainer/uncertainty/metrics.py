@@ -41,7 +41,7 @@ METRIC_LABELS: dict[str, str] = {
     "lower": "Lower bound",
     "upper": "Upper bound",
     "midpoint": "Interval midpoint",
-    "set_size": "Prediction set size",
+    "set_size": "Set size",
     "credibility": "Credibility (max p-value)",
     "confidence": "Confidence (1 - 2nd p-value)",
 }

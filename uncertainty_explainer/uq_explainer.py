@@ -270,6 +270,7 @@ class UncertaintyExplanationPipeline:
             self.cp = CrepesConformalClassifier(
                 model,
                 method=conformal_method,
+                random_state=random_state,
             )
         elif conformal_method == "cqr":
             if lower_model is None or upper_model is None:
@@ -522,6 +523,7 @@ class UncertaintyExplanationPipeline:
                 kind=plot_kind,
                 waterfall_index=waterfall_index,
                 result=result,
+
             )
 
         return result
@@ -571,10 +573,13 @@ class UncertaintyExplanationPipeline:
             self.task == "classification"
             and isinstance(result, ClassificationExplanationResult)
         ):
-            generate_classification_plots(
-                result,
-                sample_index=waterfall_index or 0,
-            )
+            classification_kinds = self._resolve_classification_kinds(result)
+            if classification_kinds:
+                generate_classification_plots(
+                    result,
+                    kinds=classification_kinds,
+                    sample_index=waterfall_index or 0,
+                )
 
     def _validate_metric(self, metric, task):
         if task == "classification" and metric not in CLASSIFICATION_METRICS:
@@ -600,6 +605,25 @@ class UncertaintyExplanationPipeline:
             raise ValueError(
                 f"X must be 2D, got shape {X_arr.shape}"
             )
+
+    def _resolve_classification_kinds(
+        self,
+        result: ClassificationExplanationResult,
+    ) -> list[str]:
+        """
+        Pick the classification-specific plot to show alongside the XAI plots.
+
+        - ``set_size`` is shown when the explainer is not local (LIME or shap for one instance).
+        - ``p_values`` is shown when the metric is ``"credibility"`` or
+          ``"confidence"`` *and* the explanation is local — i.e. a single
+          instance was passed, or the explainer is LIME.
+        """
+
+        n = int(np.asarray(result.prediction_set).shape[0])
+        if n == 1 or self.xai_method == "lime":
+            return ["p_values"]
+        else:
+            return ["set_size"]
 
     def _resolve_plot_kinds(
         self,

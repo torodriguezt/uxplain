@@ -93,4 +93,6 @@ class ShapUncertaintyExplainer:
         if self.feature_names is not None:
             explanation.feature_names = self.feature_names
 
+        explanation.metric = self.metric
+
         return explanation

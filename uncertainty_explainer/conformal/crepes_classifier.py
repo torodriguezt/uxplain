@@ -48,9 +48,11 @@ class CrepesConformalClassifier:
         self,
         model,
         method: ClassificationConformalMethod = "standard",
+        random_state: int | None = None,
     ):
         self.model = model
         self.method = method
+        self.random_state = random_state
         self.wrapper = None
         self.mondrian_categorizer = None
         self.classes_ = None
@@ -117,7 +119,9 @@ class CrepesConformalClassifier:
             raise RuntimeError("CrepesConformalClassifier not fitted.")
 
         X = np.asarray(X)
-        return self.wrapper.predict_set(X, confidence=confidence).astype(bool)
+        return self.wrapper.predict_set(
+            X, confidence=confidence, seed=self.random_state,
+        ).astype(bool)
 
     def predict_p(
         self,
@@ -135,7 +139,7 @@ class CrepesConformalClassifier:
             raise RuntimeError("CrepesConformalClassifier not fitted.")
 
         X = np.asarray(X)
-        return self.wrapper.predict_p(X)
+        return self.wrapper.predict_p(X, seed=self.random_state)
 
     def predict_proba(
         self,
