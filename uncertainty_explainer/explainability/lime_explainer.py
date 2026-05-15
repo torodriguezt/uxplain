@@ -5,7 +5,6 @@ LIME explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 from lime.lime_tabular import LimeTabularExplainer
 import numpy as np
@@ -35,7 +34,7 @@ class LIMEExplanation:
         labels.
     """
 
-    feature_names: List[str]
+    feature_names: list[str]
     local_coefficients: np.ndarray
     metric: str = "width"
 
@@ -53,7 +52,7 @@ class LimeUncertaintyExplainer:
         cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
         n_lime_samples: int = 5000,
-        feature_names: Optional[List[str]] = None,
+        feature_names: list[str] | None = None,
         random_state: int | None = None,
         metric: UncertaintyMetric = "width",
     ):

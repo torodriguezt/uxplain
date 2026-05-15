@@ -5,7 +5,6 @@ PDP explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -56,15 +55,15 @@ class PDPExplanation:
         Only present when ``kind="individual"`` or ``kind="both"``.
     """
 
-    values: List[np.ndarray]
-    grid_values: List[np.ndarray]
-    features: List[int]
+    values: list[np.ndarray]
+    grid_values: list[np.ndarray]
+    features: list[int]
     kind: str = field(default="average")
-    feature_names: Optional[List[str]] = field(default=None)
-    individual: Optional[List[np.ndarray]] = field(default=None)
-    feature_pairs: Optional[List[Tuple[int, int]]] = field(default=None)
-    values_2d: Optional[List[np.ndarray]] = field(default=None)
-    grid_values_2d: Optional[List[Tuple[np.ndarray, np.ndarray]]] = field(default=None)
+    feature_names: list[str] | None = field(default=None)
+    individual: list[np.ndarray] | None = field(default=None)
+    feature_pairs: list[tuple[int, int]] | None = field(default=None)
+    values_2d: list[np.ndarray] | None = field(default=None)
+    grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
     metric: str = field(default="width")
 
 
@@ -85,13 +84,13 @@ class PDPUncertaintyExplainer:
         cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
         method: str = "brute",
-        features: Optional[List[int]] = None,
+        features: list[int] | None = None,
         grid_resolution: int = 100,
         grid_resolution_2d: int = 20,
-        percentiles: Tuple[float, float] = (0.05, 0.95),
+        percentiles: tuple[float, float] = (0.05, 0.95),
         kind: str = "average",
-        feature_names: Optional[List[str]] = None,
-        n_jobs: Optional[int] = None,
+        feature_names: list[str] | None = None,
+        n_jobs: int | None = None,
         metric: UncertaintyMetric = "width",
     ):
         """
@@ -148,15 +147,15 @@ class PDPUncertaintyExplainer:
         self.n_jobs = n_jobs
         self.metric = metric
 
-        self._estimator: Optional[_FunctionEstimator] = None
+        self._estimator: _FunctionEstimator | None = None
 
     def fit(
         self,
         X_background: np.ndarray,
-        features: Optional[List] = None,
-        kind: Optional[str] = None,
-        grid_resolution: Optional[int] = None,
-        percentiles: Optional[Tuple[float, float]] = None,
+        features: list | None = None,
+        kind: str | None = None,
+        grid_resolution: int | None = None,
+        percentiles: tuple[float, float] | None = None,
         **_,
     ) -> None:
         """
