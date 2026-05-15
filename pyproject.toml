@@ -9,6 +9,8 @@ description = "Explainability for conformal prediction uncertainty — regressio
 authors = [
   { name = "Veronica Seguro Varela" },
   { name = "Tomas Rodriguez Taborda" },
+  { name = "Rafael Izbicki" },
+  { name = "Johnatan Cardona" },
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
