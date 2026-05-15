@@ -174,16 +174,15 @@ def generate_lime_plots(
         coefs = explanation.local_coefficients[sample_index]
         order = np.argsort(np.abs(coefs))
         labels = [fnames[i] for i in order]
-        colors = ["lightgray" if c >= 0 else "tomato" for c in coefs[order]]
+        # positive coef → increases uncertainty (tomato), negative → decreases (steelblue)
+        colors = ["tomato" if c >= 0 else "steelblue" for c in coefs[order]]
 
         fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * n)))
         bars = ax.barh(labels, coefs[order], color=colors, edgecolor="black", linewidth=0.5)
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.axvline(0, color="black", linewidth=0.8)
         ax.set_xlabel(f"LIME coefficient (effect on {metric_text})")
-        ax.set_title(
-            f"LIME — Local explanation - Uncertainty metric {metric_text}"
-        )
+        ax.set_title(f"LIME — Local explanation — Uncertainty metric ({metric_text})")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["local"] = fig
@@ -199,6 +198,8 @@ _PDP_KIND_REQUIREMENTS = {
     "ice": ("individual", "both"),
     "pdp_ice": ("both",),
 }
+
+_ICE_MAX_LINES = 80
 
 
 def _validate_pdp_kinds(kinds: list[str], explanation_kind: str) -> None:
@@ -305,12 +306,21 @@ def generate_pdp_plots(
             if explanation.individual is None:
                 ax.set_title(f"ICE — {_fname(i)}\n(no individual data)")
                 continue
-            for line in explanation.individual[i]:
-                ax.plot(explanation.grid_values[i], line, lw=0.5, alpha=0.3, color="steelblue")
+            lines = explanation.individual[i]
+            # subsample to avoid overplotting
+            if len(lines) > _ICE_MAX_LINES:
+                rng = np.random.default_rng(0)
+                idx = rng.choice(len(lines), _ICE_MAX_LINES, replace=False)
+                lines = lines[idx]
+            alpha = max(0.15, min(0.5, 30 / len(lines)))
+            for line in lines:
+                ax.plot(explanation.grid_values[i], line, lw=0.7, alpha=alpha, color="steelblue")
             ax.set_xlabel(_fname(i))
             ax.set_ylabel(metric_name)
             ax.set_title(f"ICE — {_fname(i)}")
             ax.grid(True, linestyle="--", alpha=0.4)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
         for ax in axes[n:]:
             ax.set_visible(False)
         fig.suptitle(f"ICE — Uncertainty metric ({metric_text})", y=1.01)
@@ -326,14 +336,25 @@ def generate_pdp_plots(
         for i in range(n):
             ax = axes[i]
             if explanation.individual is not None:
-                for line in explanation.individual[i]:
-                    ax.plot(explanation.grid_values[i], line, lw=0.5, alpha=0.2, color="steelblue")
-            ax.plot(explanation.grid_values[i], explanation.values[i], lw=2.5, color="tomato", label="PDP")
+                lines = explanation.individual[i]
+                if len(lines) > _ICE_MAX_LINES:
+                    rng = np.random.default_rng(0)
+                    idx = rng.choice(len(lines), _ICE_MAX_LINES, replace=False)
+                    lines = lines[idx]
+                alpha = max(0.12, min(0.4, 25 / len(lines)))
+                for line in lines:
+                    ax.plot(explanation.grid_values[i], line, lw=0.7, alpha=alpha, color="steelblue")
+            ax.plot(
+                explanation.grid_values[i], explanation.values[i],
+                lw=3, color="tomato", label="PDP", zorder=5,
+            )
             ax.set_xlabel(_fname(i))
             ax.set_ylabel(metric_name)
             ax.set_title(f"PDP + ICE — {_fname(i)}")
-            ax.legend(fontsize=8)
+            ax.legend(fontsize=9, framealpha=0.85)
             ax.grid(True, linestyle="--", alpha=0.4)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
         for ax in axes[n:]:
             ax.set_visible(False)
         fig.suptitle(f"PDP + ICE — Uncertainty metric ({metric_text})", y=1.01)
@@ -380,7 +401,7 @@ def generate_pdp_plots(
         bars = ax.barh(labels, importance[order], color="gray")
         ax.bar_label(bars, fmt="%.4f", padding=3, fontsize=8)
         ax.set_xlabel(r"$I(\mathbf{x}_S)$ — std of PDP values")
-        ax.set_title(f"Feature importance — uncertainty metric ({metric_text})")
+        ax.set_title(f"Feature importance — Uncertainty metric ({metric_text})")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["importance"] = fig
@@ -389,6 +410,9 @@ def generate_pdp_plots(
         plt.show()
 
     return figures
+
+
+_SET_MEMBERSHIP_MAX_SAMPLES = 60
 
 
 def generate_classification_plots(
@@ -443,28 +467,34 @@ def generate_classification_plots(
     # --- Set-size distribution ---
     if "set_size" in kinds:
         sizes = np.asarray(result.set_size).astype(int)
+        n_classes = len(classes)
         max_size = int(sizes.max()) if len(sizes) else 0
         bins = np.arange(0, max_size + 2) - 0.5
 
-        fig, ax = plt.subplots(figsize=(6, 4))
-        counts, _, patches = ax.hist(sizes, bins=bins, color="salmon",
-                                     edgecolor="black", linewidth=0.5)
-        ax.set_xticks(np.arange(0, max_size + 1))
+        fig, ax = plt.subplots(figsize=(max(5, max_size * 1.2), 4))
+        counts, _, patches = ax.hist(
+            sizes, bins=bins, color="salmon", edgecolor="white", linewidth=0.8,
+        )
+        ax.set_xticks(np.arange(0, n_classes + 1))
+        ax.set_xlim(-0.5, n_classes + 0.5)
         ax.set_xlabel("Prediction set size")
         ax.set_ylabel("Number of samples")
         mean_size = float(sizes.mean()) if len(sizes) else 0.0
         ax.set_title(
-            f"Prediction set size distribution (mean = {mean_size:.2f})"
+            f"Conformal prediction set size — mean = {mean_size:.2f} "
+            f"(out of {n_classes} classes)"
         )
         ax.grid(True, axis="y", linestyle="--", alpha=0.4)
         for count, patch in zip(counts, patches):
             if count > 0:
                 ax.text(
                     patch.get_x() + patch.get_width() / 2,
-                    count,
+                    count + 0.5,
                     f"{int(count)}",
-                    ha="center", va="bottom", fontsize=8,
+                    ha="center", va="bottom", fontsize=9, fontweight="bold",
                 )
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
         fig.tight_layout()
         figures["set_size"] = fig
 
@@ -472,32 +502,65 @@ def generate_classification_plots(
     if "p_values" in kinds:
         p_row = np.asarray(result.p_values)[sample_index]
         in_set = np.asarray(result.prediction_set)[sample_index]
-        colors = ["tomato" if inc else "lightgray" for inc in in_set]
+        colors = ["tomato" if inc else "#d0d0d0" for inc in in_set]
 
-        fig, ax = plt.subplots(figsize=(6, max(3, 0.4 * len(classes))))
-        bars = ax.barh(class_labels, p_row, color=colors,
-                       edgecolor="black", linewidth=0.5)
-        ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8)
+        fig, ax = plt.subplots(figsize=(6, max(3, 0.55 * len(classes))))
+        bars = ax.barh(
+            class_labels, p_row, color=colors,
+            edgecolor="white", linewidth=0.8, height=0.6,
+        )
+        ax.bar_label(bars, fmt="%.3f", padding=4, fontsize=9)
         ax.set_xlabel("Conformal p-value")
         ax.set_ylabel("Class")
-        ax.set_title("P-values per class — red = in prediction set")
-        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+        ax.set_title(f"Conformal p-values — sample {sample_index}")
+        ax.set_xlim(0, min(1.0, p_row.max() * 1.25) if p_row.max() > 0 else 0.1)
+        ax.axvline(0, color="black", linewidth=0.6)
+        ax.grid(True, axis="x", linestyle="--", alpha=0.35)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        # legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor="tomato", edgecolor="white", label="In prediction set"),
+            Patch(facecolor="#d0d0d0", edgecolor="white", label="Not in set"),
+        ]
+        ax.legend(handles=legend_elements, loc="lower right", fontsize=8, framealpha=0.8)
         fig.tight_layout()
         figures["p_values"] = fig
 
     # --- Set membership heatmap ---
     if "set_membership" in kinds:
         membership = np.asarray(result.prediction_set).astype(int)
-        fig, ax = plt.subplots(figsize=(max(4, 0.3 * len(classes)),
-                                         max(3, 0.15 * membership.shape[0])))
-        im = ax.imshow(membership, aspect="auto", cmap="RdYlBu_r",
-                       interpolation="nearest", vmin=0, vmax=1)
-        ax.set_xticks(np.arange(len(classes)))
-        ax.set_xticklabels(class_labels, rotation=45, ha="right")
-        ax.set_xlabel("Class")
-        ax.set_ylabel("Sample index")
-        ax.set_title("Prediction set membership (1 = in set)")
-        fig.colorbar(im, ax=ax, ticks=[0, 1])
+        n_samples = membership.shape[0]
+
+        # Cap rows shown to avoid impossibly tall figures
+        truncated = n_samples > _SET_MEMBERSHIP_MAX_SAMPLES
+        display = membership[:_SET_MEMBERSHIP_MAX_SAMPLES] if truncated else membership
+        n_show = display.shape[0]
+
+        n_cls = len(classes)
+        fig_w = max(3.5, 1.0 * n_cls)
+        fig_h = max(3.0, min(8.0, 0.18 * n_show))
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+        from matplotlib.colors import ListedColormap
+        binary_cmap = ListedColormap(["#3b4cc0", "#d62728"])  # blue=0, red=1
+        im = ax.imshow(
+            display, aspect="auto", cmap=binary_cmap,
+            interpolation="nearest", vmin=0, vmax=1,
+        )
+        ax.set_xticks(np.arange(n_cls))
+        ax.set_xticklabels(class_labels, rotation=0, ha="center", fontsize=10)
+        ax.set_xlabel("Class", fontsize=10)
+        ax.set_ylabel("Sample index", fontsize=10)
+        title = "Prediction set membership"
+        if truncated:
+            title += f"  (first {_SET_MEMBERSHIP_MAX_SAMPLES} of {n_samples} samples)"
+        ax.set_title(title)
+        cbar = fig.colorbar(im, ax=ax, ticks=[0, 1], shrink=0.6)
+        cbar.ax.set_yticklabels(["Not in set", "In set"], fontsize=8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
         fig.tight_layout()
         figures["set_membership"] = fig
 
