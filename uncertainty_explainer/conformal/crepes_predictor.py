@@ -129,7 +129,6 @@ class CrepesConformalPredictor:
         intervals = self.wrapper.predict_int(
             X,
             confidence=confidence,
-          #  **predict_kwargs,
         )
 
         lower = intervals[:, 0]
