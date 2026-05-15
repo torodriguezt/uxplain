@@ -199,9 +199,6 @@ _PDP_KIND_REQUIREMENTS = {
     "pdp_ice": ("both",),
 }
 
-_ICE_MAX_LINES = 80
-
-
 def _validate_pdp_kinds(kinds: list[str], explanation_kind: str) -> None:
     for plot_kind in kinds:
         allowed = _PDP_KIND_REQUIREMENTS.get(plot_kind)
@@ -219,6 +216,7 @@ def generate_pdp_plots(
     explanation,
     kinds: list[str] | None = None,
     feature_names: list[str] | None = None,
+    max_ice_lines: int = 80,
     show: bool = True,
 ) -> dict:
     """
@@ -241,6 +239,11 @@ def generate_pdp_plots(
 
     feature_names : list of str, optional
         Overrides ``explanation.feature_names`` for axis labels.
+
+    max_ice_lines : int
+        Maximum number of ICE lines to draw per feature. When there are
+        more samples than this limit, a random subset is drawn to avoid
+        overplotting. Default is 80.
 
     show : bool
         Whether to call ``plt.show()``.
@@ -308,9 +311,9 @@ def generate_pdp_plots(
                 continue
             lines = explanation.individual[i]
             # subsample to avoid overplotting
-            if len(lines) > _ICE_MAX_LINES:
+            if len(lines) > max_ice_lines:
                 rng = np.random.default_rng(0)
-                idx = rng.choice(len(lines), _ICE_MAX_LINES, replace=False)
+                idx = rng.choice(len(lines), max_ice_lines, replace=False)
                 lines = lines[idx]
             alpha = max(0.15, min(0.5, 30 / len(lines)))
             for line in lines:
@@ -337,9 +340,9 @@ def generate_pdp_plots(
             ax = axes[i]
             if explanation.individual is not None:
                 lines = explanation.individual[i]
-                if len(lines) > _ICE_MAX_LINES:
+                if len(lines) > max_ice_lines:
                     rng = np.random.default_rng(0)
-                    idx = rng.choice(len(lines), _ICE_MAX_LINES, replace=False)
+                    idx = rng.choice(len(lines), max_ice_lines, replace=False)
                     lines = lines[idx]
                 alpha = max(0.12, min(0.4, 25 / len(lines)))
                 for line in lines:
@@ -412,13 +415,11 @@ def generate_pdp_plots(
     return figures
 
 
-_SET_MEMBERSHIP_MAX_SAMPLES = 60
-
-
 def generate_classification_plots(
     result,
     kinds: list[str] | None = None,
     sample_index: int = 0,
+    max_samples: int = 60,
     show: bool = True,
 ) -> dict:
     """
@@ -447,6 +448,11 @@ def generate_classification_plots(
 
     sample_index : int
         Sample row to highlight in the ``"p_values"`` plot.
+
+    max_samples : int
+        Maximum number of rows shown in the ``"set_membership"`` heatmap.
+        When there are more samples than this limit, only the first
+        ``max_samples`` rows are shown. Default is 60.
 
     show : bool
         Whether to call ``plt.show()``.
@@ -534,8 +540,8 @@ def generate_classification_plots(
         n_samples = membership.shape[0]
 
         # Cap rows shown to avoid impossibly tall figures
-        truncated = n_samples > _SET_MEMBERSHIP_MAX_SAMPLES
-        display = membership[:_SET_MEMBERSHIP_MAX_SAMPLES] if truncated else membership
+        truncated = n_samples > max_samples
+        display = membership[:max_samples] if truncated else membership
         n_show = display.shape[0]
 
         n_cls = len(classes)
@@ -555,7 +561,7 @@ def generate_classification_plots(
         ax.set_ylabel("Sample index", fontsize=10)
         title = "Prediction set membership"
         if truncated:
-            title += f"  (first {_SET_MEMBERSHIP_MAX_SAMPLES} of {n_samples} samples)"
+            title += f"  (first {max_samples} of {n_samples} samples)"
         ax.set_title(title)
         cbar = fig.colorbar(im, ax=ax, ticks=[0, 1], shrink=0.6)
         cbar.ax.set_yticklabels(["Not in set", "In set"], fontsize=8)
