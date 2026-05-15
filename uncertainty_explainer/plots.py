@@ -5,8 +5,6 @@ explanations.
 
 from __future__ import annotations
 
-from typing import List
-
 import matplotlib.pyplot as plt
 import numpy as np
 import shap
@@ -14,8 +12,8 @@ import shap
 from .uncertainty.metrics import metric_label
 
 
-def generate_default_plots(
-    shap_values,
+def generate_shap_plots(
+    explanation,
     X=None,
     kinds: list[str] | None = None,
     feature_names: list[str] | None = None,
@@ -27,8 +25,8 @@ def generate_default_plots(
 
     Parameters
     ----------
-    shap_values
-        SHAP explanation object.
+    explanation
+        SHAP explanation object (``shap.Explanation``).
 
     X : np.ndarray, optional
 
@@ -57,13 +55,13 @@ def generate_default_plots(
         kinds = ["beeswarm", "bar", "waterfall"]
 
     if feature_names is not None:
-        shap_values.feature_names = feature_names
+        explanation.feature_names = feature_names
 
     auto_selected = waterfall_index is None
     if auto_selected:
-        waterfall_index = int(np.abs(shap_values.values).sum(axis=1).argmax())
+        waterfall_index = int(np.abs(explanation.values).sum(axis=1).argmax())
 
-    metric_name = metric_label(getattr(shap_values, "metric", "width"))
+    metric_name = metric_label(getattr(explanation, "metric", "width"))
     metric_text = metric_name.lower()
 
     figures = {}
@@ -71,7 +69,7 @@ def generate_default_plots(
     if "summary" in kinds:
         plt.figure()
         shap.summary_plot(
-            shap_values,
+            explanation,
             X,
             show=False,
             rng=np.random.default_rng(0),
@@ -83,7 +81,7 @@ def generate_default_plots(
     if "bar" in kinds:
         plt.figure()
         shap.plots.bar(
-            shap_values,
+            explanation,
             show=False,
         )
         fig = plt.gcf()
@@ -93,7 +91,7 @@ def generate_default_plots(
     if "beeswarm" in kinds:
         plt.figure()
         shap.plots.beeswarm(
-            shap_values,
+            explanation,
             show=False,
         )
         fig = plt.gcf()
@@ -103,7 +101,7 @@ def generate_default_plots(
     if "waterfall" in kinds:
         plt.figure()
         shap.plots.waterfall(
-            shap_values[waterfall_index],
+            explanation[waterfall_index],
             show=False,
         )
         fig = plt.gcf()
@@ -124,9 +122,12 @@ def generate_default_plots(
     return figures
 
 
+generate_default_plots = generate_shap_plots
+
+
 def generate_lime_plots(
     explanation,
-    kinds: List[str] | None = None,
+    kinds: list[str] | None = None,
     sample_index: int = 0,
     show: bool = True,
 ) -> dict:
@@ -200,7 +201,7 @@ _PDP_KIND_REQUIREMENTS = {
 }
 
 
-def _validate_pdp_kinds(kinds: List[str], explanation_kind: str) -> None:
+def _validate_pdp_kinds(kinds: list[str], explanation_kind: str) -> None:
     for plot_kind in kinds:
         allowed = _PDP_KIND_REQUIREMENTS.get(plot_kind)
         if allowed is None:
@@ -215,8 +216,8 @@ def _validate_pdp_kinds(kinds: List[str], explanation_kind: str) -> None:
 
 def generate_pdp_plots(
     explanation,
-    kinds: List[str] | None = None,
-    feature_names: List[str] | None = None,
+    kinds: list[str] | None = None,
+    feature_names: list[str] | None = None,
     show: bool = True,
 ) -> dict:
     """
@@ -312,7 +313,7 @@ def generate_pdp_plots(
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle(f"ICE — Uncertainty metric({metric_text})", y=1.01)
+        fig.suptitle(f"ICE — Uncertainty metric ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["ice"] = fig
 
@@ -335,7 +336,7 @@ def generate_pdp_plots(
             ax.grid(True, linestyle="--", alpha=0.4)
         for ax in axes[n:]:
             ax.set_visible(False)
-        fig.suptitle(f"PDP + ICE — uncertainty metric ({metric_text})", y=1.01)
+        fig.suptitle(f"PDP + ICE — Uncertainty metric ({metric_text})", y=1.01)
         fig.tight_layout()
         figures["pdp_ice"] = fig
 
@@ -361,7 +362,7 @@ def generate_pdp_plots(
             ax.set_xlabel(fname_a)
             ax.set_ylabel(fname_b)
             ax.set_title(
-                f"2D PDP — {fname_a} × {fname_b} — uncertainty metric({metric_text})"
+                f"2D PDP — {fname_a} × {fname_b} — Uncertainty metric ({metric_text})"
             )
             fig.tight_layout()
             figures[f"pdp_2d_{idx}"] = fig
@@ -392,7 +393,7 @@ def generate_pdp_plots(
 
 def generate_classification_plots(
     result,
-    kinds: List[str] | None = None,
+    kinds: list[str] | None = None,
     sample_index: int = 0,
     show: bool = True,
 ) -> dict:
@@ -479,10 +480,7 @@ def generate_classification_plots(
         ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8)
         ax.set_xlabel("Conformal p-value")
         ax.set_ylabel("Class")
-        ax.set_title(
-            f"P-values per class — "
-            f"red = in prediction set"
-        )
+        ax.set_title("P-values per class — red = in prediction set")
         ax.grid(True, axis="x", linestyle="--", alpha=0.4)
         fig.tight_layout()
         figures["p_values"] = fig

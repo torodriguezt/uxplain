@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Literal
 
 from crepes import WrapClassifier
-from crepes.extras import MondrianCategorizer
 import numpy as np
 
 ClassificationConformalMethod = Literal[
@@ -54,7 +53,6 @@ class CrepesConformalClassifier:
         self.method = method
         self.random_state = random_state
         self.wrapper = None
-        self.mondrian_categorizer = None
         self.classes_ = None
 
     def fit(
