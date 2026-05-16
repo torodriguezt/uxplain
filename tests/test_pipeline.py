@@ -271,14 +271,6 @@ class TestPDPKindValidation:
         figs = generate_pdp_plots(explanation, kinds=[plot_kind], show=False)
         assert plot_kind in figs
 
-    @pytest.mark.parametrize("explainer_kind", ["average", "individual", "both"])
-    def test_importance_works_under_any_kind(self, data, explainer_kind):
-        # Importance uses .values, which is always populated (the explainer
-        # internally requests "both" when kind="individual").
-        explanation = _fit_pdp_explanation(data, kind=explainer_kind)
-        figs = generate_pdp_plots(explanation, kinds=["importance"], show=False)
-        assert "importance" in figs
-
 
 # ---------------------------------------------------------------------------
 # Classification pipeline

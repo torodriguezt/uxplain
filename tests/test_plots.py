@@ -7,7 +7,6 @@ from uncertainty_explainer import (
     UncertaintyExplanationPipeline,
 )
 from uncertainty_explainer.plots import (
-    generate_classification_plots,
     generate_lime_plots,
     generate_pdp_plots,
     generate_shap_plots,
@@ -137,22 +136,6 @@ class TestGeneratePDPPlots:
         figs = generate_pdp_plots(exp, kinds=["pdp"], show=False)
         assert "pdp" in figs
 
-    def test_importance_returns_figure(self, regression_pdp_result):
-        _, result = regression_pdp_result
-        figs = generate_pdp_plots(
-            result.explanation_values, kinds=["importance"], show=False,
-        )
-        assert "importance" in figs
-
-    def test_importance_has_one_bar_per_feature(self, regression_pdp_result, data):
-        _, result = regression_pdp_result
-        n_features = data["X_test"].shape[1]
-        figs = generate_pdp_plots(
-            result.explanation_values, kinds=["importance"], show=False,
-        )
-        ax = figs["importance"].axes[0]
-        assert len(ax.patches) == n_features
-
 
 # ---------------------------------------------------------------------------
 # LIME plots
@@ -175,48 +158,10 @@ class TestGenerateLimePlots:
 
 
 # ---------------------------------------------------------------------------
-# Classification plots
+# Classification result fields
 # ---------------------------------------------------------------------------
 
-class TestGenerateClassificationPlots:
-    def test_set_size_returns_figure(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(result, kinds=["set_size"], show=False)
-        assert "set_size" in figs
-
-    def test_p_values_returns_figure(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(result, kinds=["p_values"], show=False)
-        assert "p_values" in figs
-
-    def test_set_membership_returns_figure(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(result, kinds=["set_membership"], show=False)
-        assert "set_membership" in figs
-
-    def test_all_classification_kinds(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(
-            result,
-            kinds=["set_size", "p_values", "set_membership"],
-            show=False,
-        )
-        assert set(figs.keys()) == {"set_size", "p_values", "set_membership"}
-
-    def test_set_size_histogram_counts_match(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(result, kinds=["set_size"], show=False)
-        ax = figs["set_size"].axes[0]
-        total = sum(p.get_height() for p in ax.patches if p.get_height() > 0)
-        assert int(total) == len(result.set_size)
-
-    def test_p_values_sample_index(self, classification_shap_result):
-        _, result = classification_shap_result
-        figs = generate_classification_plots(
-            result, kinds=["p_values"], sample_index=2, show=False,
-        )
-        assert "p_values" in figs
-
+class TestClassificationResultFields:
     def test_classification_result_fields(self, classification_shap_result, classification_data):
         _, result = classification_shap_result
         n = 5

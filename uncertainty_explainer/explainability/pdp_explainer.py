@@ -65,6 +65,9 @@ class PDPExplanation:
     values_2d: list[np.ndarray] | None = field(default=None)
     grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
     metric: str = field(default="width")
+    pd_results_raw: list | None = field(default=None)
+    deciles_: dict | None = field(default=None)
+    display_2d_: object | None = field(default=None)
 
 
 class PDPUncertaintyExplainer:
@@ -259,12 +262,15 @@ class PDPUncertaintyExplainer:
         values = []
         grid_values = []
         individual = [] if self.kind in ("individual", "both") else None
+        pd_bunches = []
+        deciles = {}
+        X_arr = np.asarray(X)
 
-        # When kind="individual" we still need average values for importance/pdp
-        # plots, so internally request "both" and always populate values.
+        # When kind="individual" we still need average values for pdp plots,
+        # so internally request "both" and always populate values.
         internal_kind = "both" if self.kind == "individual" else self.kind
 
-        for feature in features_1d:
+        for i, feature in enumerate(features_1d):
             pd_result = partial_dependence(
                 self._estimator,
                 X,
@@ -274,6 +280,8 @@ class PDPUncertaintyExplainer:
                 percentiles=self.percentiles,
                 kind=internal_kind,
             )
+            pd_bunches.append(pd_result)
+            deciles[i] = np.percentile(X_arr[:, feature], np.arange(10, 100, 10))
             grid_values.append(pd_result["grid_values"][0])
             values.append(pd_result["average"][0])
             if self.kind in ("individual", "both"):
@@ -283,6 +291,7 @@ class PDPUncertaintyExplainer:
         values_2d = []
         grid_values_2d = []
 
+        display_2d = None
         if feature_pairs:
             display_2d = PartialDependenceDisplay.from_estimator(
                 self._estimator,
@@ -293,6 +302,7 @@ class PDPUncertaintyExplainer:
                 percentiles=self.percentiles,
                 kind="average",
                 n_jobs=self.n_jobs,
+                feature_names=self.feature_names,
             )
             for result in display_2d.pd_results:
                 values_2d.append(result["average"][0])
@@ -308,6 +318,9 @@ class PDPUncertaintyExplainer:
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
             metric=self.metric,
+            pd_results_raw=pd_bunches,
+            deciles_=deciles,
+            display_2d_=display_2d,
         )
 
         if self.feature_names is not None:

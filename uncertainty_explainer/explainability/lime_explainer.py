@@ -37,6 +37,7 @@ class LIMEExplanation:
     feature_names: list[str]
     local_coefficients: np.ndarray
     metric: str = "width"
+    raw_explanations: list | None = None
 
 
 class LimeUncertaintyExplainer:
@@ -147,6 +148,7 @@ class LimeUncertaintyExplainer:
         fnames = self.feature_names or [str(i) for i in range(self._n_features)]
 
         coefficients = np.zeros((n_samples, self._n_features))
+        raw_exps = []
 
         for i, sample in enumerate(X):
             exp = self._lime_explainer.explain_instance(
@@ -155,6 +157,7 @@ class LimeUncertaintyExplainer:
                 num_features=self._n_features,
                 num_samples=self.n_lime_samples,
             )
+            raw_exps.append(exp)
             # as_map()[1] → {feature_index: coefficient}
             for feat_idx, coef in exp.as_map()[1]:
                 coefficients[i, feat_idx] = coef
@@ -163,4 +166,5 @@ class LimeUncertaintyExplainer:
             feature_names=fnames,
             local_coefficients=coefficients,
             metric=self.metric,
+            raw_explanations=raw_exps,
         )
