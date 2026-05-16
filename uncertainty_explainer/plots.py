@@ -246,7 +246,6 @@ def generate_lime_plots(
             fig.tight_layout()
         else:
             fnames = explanation.feature_names
-            n = len(fnames)
             coefs = explanation.local_coefficients[sample_index]
             order = np.argsort(np.abs(coefs))
             labels = [fnames[i] for i in order]
