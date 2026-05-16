@@ -24,7 +24,6 @@ from .explainability.lime_explainer import LimeUncertaintyExplainer
 from .explainability.pdp_explainer import PDPUncertaintyExplainer
 from .explainability.shap_explainer import ShapUncertaintyExplainer
 from .plots import (
-    generate_classification_plots,
     generate_lime_plots,
     generate_pdp_plots,
     generate_shap_plots,
@@ -42,9 +41,8 @@ XAIMethod = Literal["shap", "pdp", "lime"]
 TaskKind = Literal["auto", "regression", "classification"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
-VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "importance", "pdp_2d")
+VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d")
 VALID_LIME_PLOT_KINDS = ("local",)
-VALID_CLASSIFICATION_PLOT_KINDS = ("set_size", "p_values", "set_membership")
 
 REGRESSION_METRICS = ("width", "lower", "upper", "midpoint")
 CLASSIFICATION_METRICS = ("set_size", "credibility", "confidence")
@@ -436,6 +434,7 @@ class UncertaintyExplanationPipeline:
         show_plots: bool = True,
         plot_kind: str | list[str] | None = None,
         waterfall_index: int | None = None,
+        figsize: tuple[float, float] | None = None,
         **explainer_kwargs,
     ):
         """
@@ -448,12 +447,13 @@ class UncertaintyExplanationPipeline:
             Whether to display plots.
         plot_kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
-            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"importance"``,
-                       ``"pdp_2d"``.
+            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"pdp_2d"``.
             For LIME: ``"local"``.
             Defaults to method-specific defaults when ``None``.
         waterfall_index : int
             Sample index for SHAP waterfall plot or LIME local plot.
+        figsize : tuple of (width, height), optional
+            Figure size in inches forwarded to the plot function.
         **explainer_kwargs
             Passed to explainer.fit().
 
@@ -522,8 +522,7 @@ class UncertaintyExplanationPipeline:
                 X=X,
                 kind=plot_kind,
                 waterfall_index=waterfall_index,
-                result=result,
-
+                figsize=figsize,
             )
 
         return result
@@ -536,14 +535,18 @@ class UncertaintyExplanationPipeline:
         X=None,
         kind: str | list[str] | None = None,
         waterfall_index: int | None = None,
+        figsize: tuple[float, float] | None = None,
         result=None,
     ):
         """
         Generate plot(s) from existing explanation results.
 
-        For classification, classification-specific plots (set size
-        distribution, p-values per class) are generated alongside the
-        explainer plots when ``result`` is a ``ClassificationExplanationResult``.
+        Parameters
+        ----------
+        figsize : tuple of (width, height), optional
+            Figure size in inches forwarded to the underlying plot
+            function. When ``None``, each plot function applies its
+            own default.
         """
 
         kinds = self._resolve_plot_kinds(kind, X=X)
@@ -553,33 +556,26 @@ class UncertaintyExplanationPipeline:
                 explanation_values,
                 kinds=kinds,
                 feature_names=self._feature_names,
+                figsize=figsize,
             )
         elif isinstance(self.explainer, LimeUncertaintyExplainer):
             generate_lime_plots(
                 explanation_values,
                 kinds=kinds,
                 sample_index=waterfall_index,
+                figsize=figsize,
             )
         else:
+            shap_kwargs = {"figsize": figsize} if figsize is not None else {}
             generate_shap_plots(
                 explanation_values,
                 X,
                 kinds=kinds,
                 feature_names=self._feature_names,
                 waterfall_index=waterfall_index,
+                **shap_kwargs,
             )
 
-        if (
-            self.task == "classification"
-            and isinstance(result, ClassificationExplanationResult)
-        ):
-            classification_kinds = self._resolve_classification_kinds(result)
-            if classification_kinds:
-                generate_classification_plots(
-                    result,
-                    kinds=classification_kinds,
-                    sample_index=waterfall_index or 0,
-                )
 
     def _validate_metric(self, metric, task):
         if task == "classification" and metric not in CLASSIFICATION_METRICS:
@@ -605,25 +601,6 @@ class UncertaintyExplanationPipeline:
             raise ValueError(
                 f"X must be 2D, got shape {X_arr.shape}"
             )
-
-    def _resolve_classification_kinds(
-        self,
-        result: ClassificationExplanationResult,
-    ) -> list[str]:
-        """
-        Pick the classification-specific plot to show alongside the XAI plots.
-
-        - ``set_size`` is shown when the explainer is not local (LIME or shap for one instance).
-        - ``p_values`` is shown when the metric is ``"credibility"`` or
-          ``"confidence"`` *and* the explanation is local — i.e. a single
-          instance was passed, or the explainer is LIME.
-        """
-
-        n = int(np.asarray(result.prediction_set).shape[0])
-        if n == 1 or self.xai_method == "lime":
-            return ["p_values"]
-        else:
-            return ["set_size"]
 
     def _resolve_plot_kinds(
         self,
