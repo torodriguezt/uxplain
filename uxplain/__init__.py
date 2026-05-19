@@ -1,6 +1,6 @@
 """uxplain: explainability for conformal prediction uncertainty."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from uxplain.conformal.cqr_predictor import CQRConformalPredictor
 from uxplain.conformal.crepes_classifier import (
