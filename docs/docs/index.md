@@ -1,10 +1,33 @@
-# uncertainty-explainer documentation!
+# uxplain
 
-## Description
+**Explainability for conformal prediction uncertainty** — regression and classification.
 
-A short description of the project.
+`uxplain` combines conformal prediction with explainability methods (SHAP, PDP, LIME) to
+answer *why* a model is more or less uncertain for a given input. It supports both
+regression (prediction intervals) and classification (prediction sets).
 
-## Commands
+## Install
 
-The Makefile contains the central entry points for common tasks related to this project.
+```bash
+pip install uxplain
+```
 
+## Quick start
+
+```python
+from sklearn.ensemble import RandomForestRegressor
+from uxplain import UncertaintyExplanationPipeline
+
+pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
+pipeline.fit(X_train, y_train)
+result = pipeline.explain(X_test)
+```
+
+See the [README](https://github.com/vseguro/uxplain#readme) for the full API:
+conformal predictors, classification pipelines, explainability backends, plot kinds,
+and the custom-component protocols.
+
+## Links
+
+- Repository: <https://github.com/vseguro/uxplain>
+- Issues: <https://github.com/vseguro/uxplain/issues>

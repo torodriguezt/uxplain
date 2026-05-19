@@ -4,15 +4,15 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import Ridge
 
-from uncertainty_explainer import (
+from uxplain import (
     ClassificationExplanationResult,
     CQRConformalPredictor,
     ExplanationResult,
     LIMEExplanation,
     UncertaintyExplanationPipeline,
 )
-from uncertainty_explainer.explainability.pdp_explainer import PDPExplanation
-from uncertainty_explainer.plots import generate_pdp_plots
+from uxplain.explainability.pdp_explainer import PDPExplanation
+from uxplain.plots import generate_pdp_plots
 import shap
 
 # Avoid blocking plot windows during tests

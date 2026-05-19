@@ -3,11 +3,11 @@ requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "uncertainty_explainer"
-version = "0.1.0"
+name = "uxplain"
+dynamic = ["version"]
 description = "Explainability for conformal prediction uncertainty — regression and classification."
 authors = [
-  { name = "Veronica Seguro Varela" },
+  { name = "Veronica Seguro Varela", email = "vseguro@unal.edu.co" },
   { name = "Tomas Rodriguez Taborda" },
   { name = "Rafael Izbicki" },
   { name = "Johnatan Cardona" },
@@ -26,7 +26,7 @@ keywords = [
     "interpretable ml",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -48,9 +48,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/vseguro/Uncertainty-Explainer"
-Repository = "https://github.com/vseguro/Uncertainty-Explainer"
-"Bug Tracker" = "https://github.com/vseguro/Uncertainty-Explainer/issues"
+Homepage = "https://github.com/vseguro/uxplain"
+Repository = "https://github.com/vseguro/uxplain"
+"Bug Tracker" = "https://github.com/vseguro/uxplain/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -59,18 +59,34 @@ dev = [
     "ruff>=0.4",
 ]
 
+[tool.flit.sdist]
+include = ["LICENSE", "README.md", "pyproject.toml", "uxplain/**/*.py"]
+exclude = [
+    "tests/",
+    "docs/",
+    "notebooks/",
+    "models/",
+    "reports/",
+    "references/",
+    "demo.ipynb",
+    "Makefile",
+    "requirements.txt",
+    ".github/",
+    "**/__pycache__/",
+    "**/*.pyc",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 99
-src = ["uncertainty_explainer"]
-include = ["pyproject.toml", "uncertainty_explainer/**/*.py"]
+src = ["uxplain"]
+include = ["pyproject.toml", "uxplain/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["uncertainty_explainer"]
+known-first-party = ["uxplain"]
 force-sort-within-sections = true
-

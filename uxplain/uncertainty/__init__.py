@@ -1,4 +1,4 @@
-from uncertainty_explainer.uncertainty.metrics import (
+from uxplain.uncertainty.metrics import (
     METRIC_LABELS,
     ClassificationMetric,
     RegressionMetric,

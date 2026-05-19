@@ -1,12 +1,12 @@
-from uncertainty_explainer.explainability.lime_explainer import (
+from uxplain.explainability.lime_explainer import (
     LIMEExplanation,
     LimeUncertaintyExplainer,
 )
-from uncertainty_explainer.explainability.pdp_explainer import (
+from uxplain.explainability.pdp_explainer import (
     PDPExplanation,
     PDPUncertaintyExplainer,
 )
-from uncertainty_explainer.explainability.shap_explainer import (
+from uxplain.explainability.shap_explainer import (
     ShapUncertaintyExplainer,
 )
 

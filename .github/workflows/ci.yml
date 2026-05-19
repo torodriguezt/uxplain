@@ -38,4 +38,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --tb=short --cov=uncertainty_explainer --cov-report=term-missing
+        run: pytest --tb=short --cov=uxplain --cov-report=term-missing
