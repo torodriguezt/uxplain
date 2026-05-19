@@ -470,16 +470,20 @@ class UncertaintyExplanationPipeline:
                 "PDP does not support single-sample (local) explanations. "
                 "Use xai_method='shap' or 'lime' instead."
             )
+        features_kw = explainer_kwargs.get("features") or []
+        pairs = [f for f in features_kw if isinstance(f, tuple)]
+        is_pdp = isinstance(self.explainer, PDPUncertaintyExplainer)
+
+        if plot_kind is None and pairs and is_pdp:
+            plot_kind = ["pdp_2d", "pdp"] 
         if plot_kind is not None:
             self._resolve_plot_kinds(plot_kind, X=X)
-            kinds_list = [plot_kind] if isinstance(plot_kind, str) else plot_kind
-            if "pdp_2d" in kinds_list:
-                features_kw = explainer_kwargs.get("features", []) or []
-                if not any(isinstance(f, tuple) for f in features_kw):
-                    raise ValueError(
-                        "plot_kind='pdp_2d' requires at least one feature pair as a tuple, "
-                        "e.g. features=[(0, 1)] or features=[0, 1, (0, 1)]."
-                    )
+            kinds = [plot_kind] if isinstance(plot_kind, str) else plot_kind
+            if "pdp_2d" in kinds and not pairs:
+                raise ValueError(
+                    "plot_kind='pdp_2d' requires at least one feature pair as a tuple, "
+                    "e.g. features=[(0, 1)] or features=[0, 1, (0, 1)]."
+                )
 
         # Rebuild explainer if kwargs changed
         if self._explainer_kwargs != explainer_kwargs:

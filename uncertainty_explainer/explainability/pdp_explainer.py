@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.inspection import PartialDependenceDisplay, partial_dependence
 
@@ -293,17 +294,19 @@ class PDPUncertaintyExplainer:
 
         display_2d = None
         if feature_pairs:
-            display_2d = PartialDependenceDisplay.from_estimator(
-                self._estimator,
-                X,
-                features=feature_pairs,
-                method=self.method,
-                grid_resolution=self.grid_resolution_2d,
-                percentiles=self.percentiles,
-                kind="average",
-                n_jobs=self.n_jobs,
-                feature_names=self.feature_names,
-            )
+            with plt.ioff():
+                display_2d = PartialDependenceDisplay.from_estimator(
+                    self._estimator,
+                    X,
+                    features=feature_pairs,
+                    method=self.method,
+                    grid_resolution=self.grid_resolution_2d,
+                    percentiles=self.percentiles,
+                    kind="average",
+                    n_jobs=self.n_jobs,
+                    feature_names=self.feature_names,
+                )
+            plt.close(display_2d.figure_)
             for result in display_2d.pd_results:
                 values_2d.append(result["average"][0])
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))

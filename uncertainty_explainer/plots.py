@@ -12,6 +12,33 @@ from sklearn.inspection import PartialDependenceDisplay
 
 from .uncertainty.metrics import metric_label
 
+VALID_SHAP_KINDS = ("beeswarm", "bar", "waterfall", "summary")
+VALID_LIME_KINDS = ("local",)
+VALID_PDP_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d")
+
+
+def _validate_kinds(kinds, valid, method):
+    if isinstance(kinds, str):
+        kinds = [kinds]
+    invalid = [k for k in kinds if k not in valid]
+    if invalid:
+        raise ValueError(
+            f"Unknown plot kind(s) {invalid} for {method}. "
+            f"Choose from {valid}."
+        )
+    return list(kinds)
+
+
+def _close_new_figures(pre_existing: set[int]) -> None:
+    """Close every figure created since the ``pre_existing`` snapshot.
+
+    Use ``pre_existing = set(plt.get_fignums())`` before generating plots,
+    then call this after ``plt.show()`` to free memory without touching
+    figures the caller already had open.
+    """
+    for fnum in set(plt.get_fignums()) - pre_existing:
+        plt.close(fnum)
+
 
 def _fix_waterfall_text_overlap(fig):
     """
@@ -97,6 +124,9 @@ def generate_shap_plots(
 
     if kinds is None:
         kinds = ["beeswarm", "bar", "waterfall"]
+    kinds = _validate_kinds(kinds, VALID_SHAP_KINDS, "SHAP")
+
+    pre_figs = set(plt.get_fignums())
 
     if feature_names is not None:
         explanation.feature_names = feature_names
@@ -168,6 +198,7 @@ def generate_shap_plots(
 
     if show:
         plt.show()
+        _close_new_figures(pre_figs)
 
     return figures
 
@@ -218,6 +249,9 @@ def generate_lime_plots(
 
     if kinds is None:
         kinds = ["local"]
+    kinds = _validate_kinds(kinds, VALID_LIME_KINDS, "LIME")
+
+    pre_figs = set(plt.get_fignums())
 
     if sample_index is None:
         sample_index = 0
@@ -262,6 +296,7 @@ def generate_lime_plots(
 
     if show:
         plt.show()
+        _close_new_figures(pre_figs)
 
     return figures
 
@@ -340,7 +375,10 @@ def generate_pdp_plots(
         else:
             kinds = ["pdp"] if has_1d else []
 
+    kinds = _validate_kinds(kinds, VALID_PDP_KINDS, "PDP")
     _validate_pdp_kinds(kinds, explanation.kind)
+
+    pre_figs = set(plt.get_fignums())
 
     if feature_names is not None:
         explanation.feature_names = feature_names
@@ -370,7 +408,19 @@ def generate_pdp_plots(
     )
 
     if use_native:
-        fnames_display = [_fname(i) for i in range(n)]
+        # Resolve labels against the ACTUAL feature index in `explanation.features`,
+        # not the display position. Otherwise a call with e.g. features=[4]
+        # would label the panel with feature_names[0] instead of feature_names[4].
+        def _resolved_fname(i: int) -> str:
+            feat_idx = explanation.features[i]
+            if (
+                explanation.feature_names is not None
+                and feat_idx < len(explanation.feature_names)
+            ):
+                return explanation.feature_names[feat_idx]
+            return f"Feature {feat_idx}"
+
+        fnames_display = [_resolved_fname(i) for i in range(n)]
         features_for_display = [(i,) for i in range(n)]
 
         def _make_display(kind="average", subsample=None):
@@ -546,6 +596,7 @@ def generate_pdp_plots(
 
     if show:
         plt.show()
+        _close_new_figures(pre_figs)
 
     return figures
 
