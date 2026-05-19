@@ -7,10 +7,10 @@ name = "uxplain"
 dynamic = ["version"]
 description = "Explainability for conformal prediction uncertainty — regression and classification."
 authors = [
-  { name = "Veronica Seguro Varela", email = "vseguro@unal.edu.co" },
-  { name = "Tomas Rodriguez Taborda", email = "torodriguezt@unal.edu.co" },
-  { name = "Rafael Izbicki", email = "rafaelizbicki@gmail.com" },
-  { name = "Johnatan Cardona Jimenez", email = "jcardonj@unal.edu.co" },
+  { name = "Veronica Seguro Varela" },
+  { name = "Tomas Rodriguez Taborda" },
+  { name = "Rafael Izbicki" },
+  { name = "Johnatan Cardona Jimenez" },
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
