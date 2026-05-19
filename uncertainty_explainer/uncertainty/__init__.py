@@ -1,7 +1,10 @@
 from uncertainty_explainer.uncertainty.metrics import (
     METRIC_LABELS,
+    ClassificationMetric,
+    RegressionMetric,
     UncertaintyMetric,
     interval_width,
+    is_classifier_predictor,
     make_interval_width_function,
     make_uncertainty_function,
     metric_label,
@@ -9,8 +12,11 @@ from uncertainty_explainer.uncertainty.metrics import (
 
 __all__ = [
     "METRIC_LABELS",
+    "ClassificationMetric",
+    "RegressionMetric",
     "UncertaintyMetric",
     "interval_width",
+    "is_classifier_predictor",
     "make_interval_width_function",
     "make_uncertainty_function",
     "metric_label",

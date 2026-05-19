@@ -5,8 +5,8 @@ PDP explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.inspection import PartialDependenceDisplay, partial_dependence
@@ -36,9 +36,11 @@ class PDPExplanation:
 
     Attributes
     ----------
-    values : np.ndarray, shape (n_features, grid_resolution)
+    values : list of np.ndarray
         Averaged PDP values per feature (the marginal effect on
-        interval width across the grid).
+        interval width across the grid). One 1D array per feature;
+        lengths may differ because sklearn caps the grid at the
+        number of unique values (e.g. categorical features).
 
     grid_values : list of np.ndarray
         Grid points used for each feature.
@@ -54,16 +56,19 @@ class PDPExplanation:
         Only present when ``kind="individual"`` or ``kind="both"``.
     """
 
-    values: np.ndarray
-    grid_values: List[np.ndarray]
-    features: List[int]
+    values: list[np.ndarray]
+    grid_values: list[np.ndarray]
+    features: list[int]
     kind: str = field(default="average")
-    feature_names: Optional[List[str]] = field(default=None)
-    individual: Optional[List[np.ndarray]] = field(default=None)
-    feature_pairs: Optional[List[Tuple[int, int]]] = field(default=None)
-    values_2d: Optional[List[np.ndarray]] = field(default=None)
-    grid_values_2d: Optional[List[Tuple[np.ndarray, np.ndarray]]] = field(default=None)
+    feature_names: list[str] | None = field(default=None)
+    individual: list[np.ndarray] | None = field(default=None)
+    feature_pairs: list[tuple[int, int]] | None = field(default=None)
+    values_2d: list[np.ndarray] | None = field(default=None)
+    grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
     metric: str = field(default="width")
+    pd_results_raw: list | None = field(default=None)
+    deciles_: dict | None = field(default=None)
+    display_2d_: object | None = field(default=None)
 
 
 class PDPUncertaintyExplainer:
@@ -83,13 +88,13 @@ class PDPUncertaintyExplainer:
         cp: ConformalPredictorProtocol,
         confidence: float = 0.9,
         method: str = "brute",
-        features: Optional[List[int]] = None,
+        features: list[int] | None = None,
         grid_resolution: int = 100,
         grid_resolution_2d: int = 20,
-        percentiles: Tuple[float, float] = (0.05, 0.95),
+        percentiles: tuple[float, float] = (0.05, 0.95),
         kind: str = "average",
-        feature_names: Optional[List[str]] = None,
-        n_jobs: Optional[int] = None,
+        feature_names: list[str] | None = None,
+        n_jobs: int | None = None,
         metric: UncertaintyMetric = "width",
     ):
         """
@@ -146,15 +151,15 @@ class PDPUncertaintyExplainer:
         self.n_jobs = n_jobs
         self.metric = metric
 
-        self._estimator: Optional[_FunctionEstimator] = None
+        self._estimator: _FunctionEstimator | None = None
 
     def fit(
         self,
         X_background: np.ndarray,
-        features: Optional[List] = None,
-        kind: Optional[str] = None,
-        grid_resolution: Optional[int] = None,
-        percentiles: Optional[Tuple[float, float]] = None,
+        features: list | None = None,
+        kind: str | None = None,
+        grid_resolution: int | None = None,
+        percentiles: tuple[float, float] | None = None,
         **_,
     ) -> None:
         """
@@ -258,12 +263,15 @@ class PDPUncertaintyExplainer:
         values = []
         grid_values = []
         individual = [] if self.kind in ("individual", "both") else None
+        pd_bunches = []
+        deciles = {}
+        X_arr = np.asarray(X)
 
-        # When kind="individual" we still need average values for importance/pdp
-        # plots, so internally request "both" and always populate values.
+        # When kind="individual" we still need average values for pdp plots,
+        # so internally request "both" and always populate values.
         internal_kind = "both" if self.kind == "individual" else self.kind
 
-        for feature in features_1d:
+        for i, feature in enumerate(features_1d):
             pd_result = partial_dependence(
                 self._estimator,
                 X,
@@ -273,6 +281,8 @@ class PDPUncertaintyExplainer:
                 percentiles=self.percentiles,
                 kind=internal_kind,
             )
+            pd_bunches.append(pd_result)
+            deciles[i] = np.percentile(X_arr[:, feature], np.arange(10, 100, 10))
             grid_values.append(pd_result["grid_values"][0])
             values.append(pd_result["average"][0])
             if self.kind in ("individual", "both"):
@@ -282,23 +292,27 @@ class PDPUncertaintyExplainer:
         values_2d = []
         grid_values_2d = []
 
+        display_2d = None
         if feature_pairs:
-            display_2d = PartialDependenceDisplay.from_estimator(
-                self._estimator,
-                X,
-                features=feature_pairs,
-                method=self.method,
-                grid_resolution=self.grid_resolution_2d,
-                percentiles=self.percentiles,
-                kind="average",
-                n_jobs=self.n_jobs,
-            )
+            with plt.ioff():
+                display_2d = PartialDependenceDisplay.from_estimator(
+                    self._estimator,
+                    X,
+                    features=feature_pairs,
+                    method=self.method,
+                    grid_resolution=self.grid_resolution_2d,
+                    percentiles=self.percentiles,
+                    kind="average",
+                    n_jobs=self.n_jobs,
+                    feature_names=self.feature_names,
+                )
+            plt.close(display_2d.figure_)
             for result in display_2d.pd_results:
                 values_2d.append(result["average"][0])
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
 
         explanation = PDPExplanation(
-            values=np.array(values) if values else values,
+            values=values,
             grid_values=grid_values,
             features=features_1d,
             kind=self.kind,
@@ -307,6 +321,9 @@ class PDPUncertaintyExplainer:
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
             metric=self.metric,
+            pd_results_raw=pd_bunches,
+            deciles_=deciles,
+            display_2d_=display_2d,
         )
 
         if self.feature_names is not None:
