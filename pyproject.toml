@@ -59,6 +59,23 @@ dev = [
     "ruff>=0.4",
 ]
 
+[tool.flit.sdist]
+include = ["LICENSE", "README.md", "CHANGELOG.md", "pyproject.toml", "uxplain/**/*.py"]
+exclude = [
+    "tests/",
+    "docs/",
+    "notebooks/",
+    "models/",
+    "reports/",
+    "references/",
+    "demo.ipynb",
+    "Makefile",
+    "requirements.txt",
+    ".github/",
+    "**/__pycache__/",
+    "**/*.pyc",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
