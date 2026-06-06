@@ -2,11 +2,11 @@ import matplotlib
 import numpy as np
 import pytest
 
-from uncertainty_explainer import (
+from uxplain import (
     ClassificationExplanationResult,
     UncertaintyExplanationPipeline,
 )
-from uncertainty_explainer.plots import (
+from uxplain.plots import (
     generate_lime_plots,
     generate_pdp_plots,
     generate_shap_plots,

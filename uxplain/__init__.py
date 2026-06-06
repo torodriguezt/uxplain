@@ -1,34 +1,36 @@
-__version__ = "0.1.0"
+"""uxplain: explainability for conformal prediction uncertainty."""
 
-from uncertainty_explainer.conformal.cqr_predictor import CQRConformalPredictor
-from uncertainty_explainer.conformal.crepes_classifier import (
+__version__ = "0.2.2"
+
+from uxplain.conformal.cqr_predictor import CQRConformalPredictor
+from uxplain.conformal.crepes_classifier import (
     ClassificationConformalMethod,
     CrepesConformalClassifier,
 )
-from uncertainty_explainer.conformal.crepes_predictor import (
+from uxplain.conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )
-from uncertainty_explainer.explainability.lime_explainer import (
+from uxplain.explainability.lime_explainer import (
     LIMEExplanation,
     LimeUncertaintyExplainer,
 )
-from uncertainty_explainer.explainability.pdp_explainer import (
+from uxplain.explainability.pdp_explainer import (
     PDPExplanation,
     PDPUncertaintyExplainer,
 )
-from uncertainty_explainer.explainability.shap_explainer import ShapUncertaintyExplainer
-from uncertainty_explainer.protocols import (
+from uxplain.explainability.shap_explainer import ShapUncertaintyExplainer
+from uxplain.protocols import (
     ConformalClassifierProtocol,
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
-from uncertainty_explainer.uncertainty.metrics import (
+from uxplain.uncertainty.metrics import (
     ClassificationMetric,
     RegressionMetric,
     UncertaintyMetric,
 )
-from uncertainty_explainer.uq_explainer import (
+from uxplain.uq_explainer import (
     ClassificationExplanationResult,
     ExplanationResult,
     UncertaintyExplanationPipeline,

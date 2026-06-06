@@ -2,7 +2,7 @@
 # GLOBALS                                                                       #
 #################################################################################
 
-PROJECT_NAME = uncertainty-explainer
+PROJECT_NAME = uxplain
 PYTHON_VERSION = 3.12
 PYTHON_INTERPRETER = python
 
@@ -60,7 +60,7 @@ create_environment:
 ## Make dataset
 .PHONY: data
 data: requirements
-	$(PYTHON_INTERPRETER) uncertainty_explainer/dataset.py
+	$(PYTHON_INTERPRETER) uxplain/dataset.py
 
 
 #################################################################################

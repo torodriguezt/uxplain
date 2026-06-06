@@ -1,11 +1,11 @@
-from uncertainty_explainer.conformal.cqr_predictor import (
+from uxplain.conformal.cqr_predictor import (
     CQRConformalPredictor,
 )
-from uncertainty_explainer.conformal.crepes_classifier import (
+from uxplain.conformal.crepes_classifier import (
     ClassificationConformalMethod,
     CrepesConformalClassifier,
 )
-from uncertainty_explainer.conformal.crepes_predictor import (
+from uxplain.conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )

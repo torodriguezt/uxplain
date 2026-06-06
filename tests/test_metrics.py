@@ -2,13 +2,13 @@ import numpy as np
 import pytest
 from sklearn.linear_model import Ridge
 
-from uncertainty_explainer import (
+from uxplain import (
     ClassificationExplanationResult,
     CrepesConformalClassifier,
     CrepesConformalPredictor,
     UncertaintyExplanationPipeline,
 )
-from uncertainty_explainer.uncertainty.metrics import (
+from uxplain.uncertainty.metrics import (
     METRIC_LABELS,
     make_uncertainty_function,
     metric_label,

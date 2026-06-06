@@ -1,4 +1,4 @@
-# Uncertainty Explainer
+# uxplain
 
 A Python library that combines **conformal prediction** with **explainability methods (XAI)** to answer *why* a model is more or less uncertain for a given input.
 
@@ -9,7 +9,7 @@ Supports both **regression** (prediction intervals) and **classification** (pred
 ## Installation
 
 ```bash
-pip install uncertainty-explainer
+pip install uxplain
 ```
 
 **Requirements:** Python ≥ 3.10, scikit-learn ≥ 1.4, shap ≥ 0.45, crepes ≥ 0.8, lime ≥ 0.2, matplotlib ≥ 3.8
@@ -26,7 +26,7 @@ pip install -e ".[dev]"
 
 ```python
 from sklearn.ensemble import RandomForestRegressor
-from uncertainty_explainer import UncertaintyExplanationPipeline
+from uxplain import UncertaintyExplanationPipeline
 
 pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
 pipeline.fit(X_train, y_train)
@@ -41,7 +41,7 @@ print(result.interval_width)  # width = upper - lower
 
 ```python
 from sklearn.ensemble import RandomForestClassifier
-from uncertainty_explainer import UncertaintyExplanationPipeline
+from uxplain import UncertaintyExplanationPipeline
 
 pipeline = UncertaintyExplanationPipeline(
     model=RandomForestClassifier(),
@@ -69,7 +69,7 @@ print(result.classes)         # class labels in model order
 | `CQRConformalPredictor` | Conformalized Quantile Regression (Romano et al., 2019). Requires two quantile regressors. |
 
 ```python
-from uncertainty_explainer import CQRConformalPredictor
+from uxplain import CQRConformalPredictor
 from sklearn.ensemble import GradientBoostingRegressor
 
 pipeline = UncertaintyExplanationPipeline(
@@ -87,7 +87,7 @@ pipeline = UncertaintyExplanationPipeline(
 | `CrepesConformalClassifier` | Wraps `crepes.WrapClassifier`. Methods: `"standard"` (default), `"class_cond"`, `"mondrian"`. |
 
 ```python
-from uncertainty_explainer import CrepesConformalClassifier
+from uxplain import CrepesConformalClassifier
 from sklearn.ensemble import GradientBoostingClassifier
 
 pipeline = UncertaintyExplanationPipeline(
@@ -221,7 +221,7 @@ result = pipeline.explain(X_test, plot_kind="bar", waterfall_index=0)
 The library exposes protocols for bringing your own components:
 
 ```python
-from uncertainty_explainer import (
+from uxplain import (
     ConformalPredictorProtocol,    # regression: fit + predict -> (lower, upper)
     ConformalClassifierProtocol,   # classification: fit + predict_set + predict_p
     UncertaintyExplainerProtocol,  # fit + explain -> Any
@@ -231,7 +231,7 @@ from uncertainty_explainer import (
 Type aliases for metrics are also importable:
 
 ```python
-from uncertainty_explainer import RegressionMetric, ClassificationMetric, UncertaintyMetric
+from uxplain import RegressionMetric, ClassificationMetric, UncertaintyMetric
 ```
 
 ---
@@ -240,7 +240,7 @@ from uncertainty_explainer import RegressionMetric, ClassificationMetric, Uncert
 
 ```bash
 pytest
-pytest --cov=uncertainty_explainer   # with coverage report
+pytest --cov=uxplain   # with coverage report
 ```
 
 ---
@@ -248,6 +248,6 @@ pytest --cov=uncertainty_explainer   # with coverage report
 ## Authors
 
 - **Veronica Seguro Varela** — MSc student in Statistical Sciences, Universidad Nacional de Colombia, Medellín
-- **Tomas Rodriguez Taborda** — student in Informatics and Computer Science Engineering & Statistics, Universidad Nacional de Colombia, Medellín
+- **Tomas Rodriguez Taborda** — Student in Informatics and Computer Science Engineering & Statistics, Universidad Nacional de Colombia, Medellín
 - **Rafael Izbicki** — PhD, Professor at Federal University of São Carlos, São Carlos
-- **Johnatan Cardona** — PhD, Professor at Universidad Nacional de Colombia, Medellín
+- **Johnatan Cardona Jimenez** — PhD, Professor at Universidad Nacional de Colombia, Medellín
