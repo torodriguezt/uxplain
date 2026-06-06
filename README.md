@@ -125,7 +125,7 @@ pipeline = UncertaintyExplanationPipeline(model=model, xai_method="lime", n_lime
 | Method | `plot_kind` options | Default |
 |---|---|---|
 | SHAP | `"beeswarm"`, `"bar"`, `"waterfall"`, `"summary"` | `["beeswarm", "bar", "waterfall"]` |
-| PDP | `"pdp"`, `"ice"`, `"pdp_ice"`, `"importance"`, `"pdp_2d"` | `["pdp", "importance"]` |
+| PDP | `"pdp"`, `"ice"`, `"pdp_ice"`, `"importance"`, `"pdp_2d"` | `["pdp"]` |
 | LIME | `"local"` | `["local"]` |
 
 ```python
