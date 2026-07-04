@@ -54,6 +54,14 @@ class PDPExplanation:
     individual : np.ndarray or None, shape (n_features, n_samples, grid_resolution)
         ICE lines — one curve per sample per feature.
         Only present when ``kind="individual"`` or ``kind="both"``.
+
+    importance : list of float or None
+        PDP-based feature importance, one value per entry in ``features``
+        (same order). Computed as the standard deviation of each feature's
+        averaged partial-dependence curve (Greenwell et al., 2018): a flat
+        curve means the feature barely moves the uncertainty metric
+        (importance ≈ 0), a strongly varying curve means high importance.
+        Only covers 1D features; 2D interaction pairs are not included.
     """
 
     values: list[np.ndarray]
@@ -62,6 +70,7 @@ class PDPExplanation:
     kind: str = field(default="average")
     feature_names: list[str] | None = field(default=None)
     individual: list[np.ndarray] | None = field(default=None)
+    importance: list[float] | None = field(default=None)
     feature_pairs: list[tuple[int, int]] | None = field(default=None)
     values_2d: list[np.ndarray] | None = field(default=None)
     grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
@@ -311,12 +320,17 @@ class PDPUncertaintyExplainer:
                 values_2d.append(result["average"][0])
                 grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
 
+        # PDP-based importance (Greenwell et al., 2018): flatness of the
+        # averaged curve. ddof=0 keeps it well-defined for single-point grids.
+        importance = [float(np.std(v)) for v in values]
+
         explanation = PDPExplanation(
             values=values,
             grid_values=grid_values,
             features=features_1d,
             kind=self.kind,
             individual=individual,
+            importance=importance,
             feature_pairs=feature_pairs,
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,

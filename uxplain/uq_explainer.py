@@ -41,7 +41,7 @@ XAIMethod = Literal["shap", "pdp", "lime"]
 TaskKind = Literal["auto", "regression", "classification"]
 
 VALID_PLOT_KINDS = ("beeswarm", "bar", "waterfall", "summary")
-VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d")
+VALID_PDP_PLOT_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d", "importance")
 VALID_LIME_PLOT_KINDS = ("local",)
 
 REGRESSION_METRICS = ("width", "lower", "upper", "midpoint")
@@ -447,7 +447,7 @@ class UncertaintyExplanationPipeline:
             Whether to display plots.
         plot_kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
-            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"pdp_2d"``.
+            For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"pdp_2d"``, ``"importance"``.
             For LIME: ``"local"``.
             Defaults to method-specific defaults when ``None``.
         waterfall_index : int
