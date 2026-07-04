@@ -42,7 +42,7 @@ dependencies = [
     "numpy>=1.26",
     "scikit-learn>=1.4",
     "shap>=0.45",
-    "crepes>=0.8",
+    "crepes>=0.9.1",
     "lime>=0.2",
     "matplotlib>=3.8",
 ]

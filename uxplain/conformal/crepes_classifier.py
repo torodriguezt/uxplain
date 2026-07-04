@@ -117,8 +117,10 @@ class CrepesConformalClassifier:
             raise RuntimeError("CrepesConformalClassifier not fitted.")
 
         X = np.asarray(X)
+        # labels=False keeps the binary-array output; since crepes 0.9.1
+        # the default (labels=True) returns a list of lists of labels.
         return self.wrapper.predict_set(
-            X, confidence=confidence, seed=self.random_state,
+            X, confidence=confidence, seed=self.random_state, labels=False,
         ).astype(bool)
 
     def predict_p(
