@@ -14,7 +14,7 @@ from .uncertainty.metrics import metric_label
 
 VALID_SHAP_KINDS = ("beeswarm", "bar", "waterfall", "summary")
 VALID_LIME_KINDS = ("local",)
-VALID_PDP_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d")
+VALID_PDP_KINDS = ("pdp", "ice", "pdp_ice", "pdp_2d", "importance")
 
 
 def _validate_kinds(kinds, valid, method):
@@ -342,6 +342,9 @@ def generate_pdp_plots(
         - ``"pdp"``        — average partial dependence line per feature
         - ``"ice"``        — individual conditional expectation lines
         - ``"pdp_ice"``    — PDP overlaid on ICE lines
+        - ``"pdp_2d"``     — 2D interaction heatmap per feature pair
+        - ``"importance"`` — global PDP-based feature importance
+          (std of each feature's PDP curve, Greenwell et al. 2018)
 
         Defaults to ``["pdp"]``.
 
@@ -573,6 +576,46 @@ def generate_pdp_plots(
             fig.suptitle(f"PDP + ICE — Uncertainty metric ({metric_text})", y=1.01)
             fig.tight_layout()
             figures["pdp_ice"] = fig
+
+    # --- Global PDP-based importance (Greenwell et al., 2018) ---
+    if "importance" in kinds and n > 0:
+        importance = getattr(explanation, "importance", None)
+        if importance is None:
+            importance = [float(np.std(v)) for v in explanation.values]
+        importance = np.asarray(importance, dtype=float)
+
+        # Resolve labels against the real feature index, not display position.
+        def _bar_fname(i: int) -> str:
+            feat_idx = explanation.features[i]
+            if (
+                explanation.feature_names is not None
+                and feat_idx < len(explanation.feature_names)
+            ):
+                return explanation.feature_names[feat_idx]
+            return f"Feature {feat_idx}"
+
+        order = np.argsort(importance)  # ascending → largest on top in barh
+        labels = [_bar_fname(i) for i in order]
+
+        fig, ax = plt.subplots(
+            figsize=figsize or (7, max(2.5, 0.5 * n + 1))
+        )
+        y = np.arange(n)
+        bars = ax.barh(
+            y, importance[order], color="tomato", edgecolor="black", linewidth=0.5
+        )
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8)
+        ax.set_xlabel(f"PDP importance (std of {metric_text} curve)")
+        ax.set_title(
+            f"PDP feature importance — Uncertainty metric ({metric_text})"
+        )
+        ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        fig.tight_layout()
+        figures["importance"] = fig
 
     # --- 2D PDP heatmaps — native sklearn PartialDependenceDisplay ---
     if "pdp_2d" in kinds:

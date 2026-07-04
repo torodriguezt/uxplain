@@ -136,6 +136,21 @@ class TestGeneratePDPPlots:
         figs = generate_pdp_plots(exp, kinds=["pdp"], show=False)
         assert "pdp" in figs
 
+    def test_importance_populated(self, regression_pdp_result, data):
+        pipeline, _ = regression_pdp_result
+        pipeline.explainer.fit(data["X_calib"])
+        exp = pipeline.explainer.explain(data["X_test"][:5])
+        assert exp.importance is not None
+        assert len(exp.importance) == len(exp.features)
+        assert all(v >= 0 for v in exp.importance)
+
+    def test_importance_returns_figure(self, regression_pdp_result, data):
+        pipeline, _ = regression_pdp_result
+        pipeline.explainer.fit(data["X_calib"])
+        exp = pipeline.explainer.explain(data["X_test"][:5])
+        figs = generate_pdp_plots(exp, kinds=["importance"], show=False)
+        assert "importance" in figs
+
 
 # ---------------------------------------------------------------------------
 # LIME plots
