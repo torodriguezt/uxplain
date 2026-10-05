@@ -9,6 +9,10 @@
 *.dta
 !docs/**/*.zip
 
+# GEIH microdata obtained from DANE for the replication scripts. DANE allows
+# analysing it but not redistributing it, so the local copy stays out of git.
+replication/data/
+
 # Generated figures. Everything under figures/ is reproduced by
 # `python make_paper_figures.py`; drop this rule if you would rather ship the
 # rendered PNGs alongside the manuscript.
