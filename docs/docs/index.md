@@ -23,11 +23,11 @@ pipeline.fit(X_train, y_train)
 result = pipeline.explain(X_test)
 ```
 
-See the [README](https://github.com/vseguro/uxplain#readme) for the full API:
+See the [README](https://github.com/torodriguezt/uxplain#readme) for the full API:
 conformal predictors, classification pipelines, explainability backends, plot kinds,
 and the custom-component protocols.
 
 ## Links
 
-- Repository: <https://github.com/vseguro/uxplain>
-- Issues: <https://github.com/vseguro/uxplain/issues>
+- Repository: <https://github.com/torodriguezt/uxplain>
+- Issues: <https://github.com/torodriguezt/uxplain/issues>
