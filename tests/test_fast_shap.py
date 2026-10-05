@@ -36,10 +36,10 @@ def _fit_crepes(data, method):
     return cp
 
 
-def _explain(cp, data, metric, fast_path):
+def _explain(cp, data, metric, fast_path, n_rows=20):
     explainer = ShapUncertaintyExplainer(cp, metric=metric, fast_path=fast_path)
     explainer.fit(data["X_calib"])
-    explanation = explainer.explain(data["X_test"][:20])
+    explanation = explainer.explain(data["X_test"][:n_rows])
     return explainer, explanation
 
 
@@ -107,6 +107,34 @@ class TestCrepesFastPath:
         assert explainer.used_fast_path is True
 
 
+class TestFastPathSingleRow:
+    """One row cannot show whether a summary varies, so the residual check must
+    not rely on the explained rows alone."""
+
+    @pytest.mark.parametrize("metric", ["width", "lower", "upper"])
+    def test_normalized_rejects_scaled_metrics(self, data, metric):
+        cp = _fit_crepes(data, "normalized")
+        explainer, _ = _explain(cp, data, metric, fast_path=True, n_rows=1)
+        assert explainer.used_fast_path is False
+
+    def test_normalized_width_matches_generic_path(self, data):
+        """The shortcut used to report all-zero attributions here."""
+        cp = _fit_crepes(data, "normalized")
+        _, fast = _explain(cp, data, "width", fast_path=True, n_rows=1)
+        _, generic = _explain(cp, data, "width", fast_path=False, n_rows=1)
+        np.testing.assert_allclose(fast.values, generic.values)
+        assert np.abs(np.asarray(fast.values)).sum() > 0
+
+    def test_cqr_still_takes_fast_path(self, data):
+        """CQR summaries are affine everywhere, so one row is still exact."""
+        cp = _fit_cqr(data)
+        explainer, fast = _explain(cp, data, "width", fast_path=True, n_rows=1)
+        _, generic = _explain(cp, data, "width", fast_path=False, n_rows=1)
+        assert explainer.used_fast_path is True
+        assert np.abs(np.asarray(fast.values)
+                      - np.asarray(generic.values)).max() < 1e-4
+
+
 class TestFastPathGuards:
     def test_non_tree_model_falls_back(self, data):
         """Ridge is not a tree ensemble, so TreeSHAP cannot be used."""
@@ -121,5 +149,14 @@ class TestFastPathGuards:
         cp = _fit_cqr(data)
         result = tree_shap_values(
             cp, "set_size", data["X_test"][:5], data["X_calib"], lambda X: X[:, 0]
+        )
+        assert result is None
+
+    def test_non_finite_summary_returns_none(self, data):
+        """Unbounded intervals (too few calibration rows) cannot be decomposed."""
+        cp = _fit_crepes(data, "standard")
+        result = tree_shap_values(
+            cp, "width", data["X_test"][:5], data["X_calib"],
+            lambda X: np.full(len(X), np.inf),
         )
         assert result is None

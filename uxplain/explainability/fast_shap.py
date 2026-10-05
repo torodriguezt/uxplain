@@ -54,6 +54,11 @@ __all__ = ["describe_fast_path", "tree_shap_values"]
 # Relative tolerance for the residual check that verifies the affine model.
 _LINEARITY_RTOL = 1e-6
 
+# Background rows added to the residual check. The explained rows alone are not
+# enough: a single row, or a batch inside one Mondrian bin, always looks
+# constant, so the check must also see the data that defines the baseline.
+_CHECK_ROWS = 100
+
 
 def _components(cp, metric: str):
     """Return ``[(model, weight), ...]`` for an affine summary, or ``None``.
@@ -109,6 +114,15 @@ def _tree_explainer(model, background):
         return None
 
 
+def _check_rows(X, background):
+    """Rows on which the affine decomposition is verified: ``X`` plus a fixed
+    sample of the background."""
+    if len(background) > _CHECK_ROWS:
+        idx = np.random.default_rng(0).choice(len(background), _CHECK_ROWS, replace=False)
+        background = background[idx]
+    return np.vstack([X, background])
+
+
 def tree_shap_values(cp, metric, X, background, target_fn):
     """
     Compute SHAP values for ``metric`` via exact TreeSHAP on component models.
@@ -124,8 +138,9 @@ def tree_shap_values(cp, metric, X, background, target_fn):
     background : np.ndarray
         Reference data defining the baseline expectation.
     target_fn : callable
-        The true ``X -> metric`` function, used to verify the decomposition and
-        to recover the calibration offset.
+        The true ``X -> metric`` function, used to verify the decomposition (on
+        ``X`` and a sample of ``background``) and to recover the calibration
+        offset.
 
     Returns
     -------
@@ -152,27 +167,34 @@ def tree_shap_values(cp, metric, X, background, target_fn):
             return None
         explainers.append((expl, weight))
 
+    # The calibration offset is whatever the true summary adds on top of the
+    # affine part. It must be constant across samples; if it is not, the
+    # decomposition is wrong for this predictor and we refuse to use it. The
+    # check runs before any SHAP value is computed, and on more than the
+    # explained rows (see _CHECK_ROWS). Non-finite summaries, such as unbounded
+    # intervals, cannot be decomposed either.
+    check = _check_rows(X, background)
+    actual = np.asarray(target_fn(check), dtype=float).ravel()
+    if len(check) < 2 or not np.all(np.isfinite(actual)):
+        return None
+    linear_part = np.zeros(len(check))
+    for expl, weight in explainers:
+        linear_part += weight * np.asarray(
+            expl.model.predict(check), dtype=float
+        ).ravel()
+    offset = actual - linear_part
+    scale = max(np.abs(actual).max(), 1.0)
+    if offset.std() > _LINEARITY_RTOL * scale:
+        return None
+
     values = np.zeros_like(X)
     base = 0.0
-    linear_part = np.zeros(len(X))
     for expl, weight in explainers:
         phi = np.asarray(expl.shap_values(X, check_additivity=False), dtype=float)
         if phi.ndim != 2 or phi.shape != X.shape:
             return None
         values += weight * phi
         base += weight * float(np.mean(np.atleast_1d(expl.expected_value)))
-        linear_part += weight * np.asarray(
-            expl.model.predict(X), dtype=float
-        ).ravel()
-
-    # The calibration offset is whatever the true summary adds on top of the
-    # affine part. It must be constant across samples; if it is not, the
-    # decomposition is wrong for this predictor and we refuse to use it.
-    actual = np.asarray(target_fn(X), dtype=float).ravel()
-    offset = actual - linear_part
-    scale = max(np.abs(actual).max(), 1.0)
-    if offset.std() > _LINEARITY_RTOL * scale:
-        return None
 
     base_values = np.full(len(X), base + float(offset.mean()))
     return values, base_values
