@@ -230,3 +230,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Paper material and local copies kept in the working directory. For now
+# this repository ships only the package code.
+SUBMISSION_CHECKLIST.md
+*.pdf
+*.bib
+replication/
+uxplain-main/
