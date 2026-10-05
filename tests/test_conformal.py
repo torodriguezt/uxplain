@@ -103,6 +103,29 @@ class TestCQRConformalPredictor:
         width_95 = (upper_95 - lower_95).mean()
         assert width_95 > width_90
 
+    def test_adjustment_is_exact_conformal_quantile(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        """The offset is the ceil((n + 1) * confidence)-th smallest score."""
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        k = int(np.ceil((len(data["y_calib"]) + 1) * 0.9))
+        lower, _ = cp.predict(data["X_test"], confidence=0.9)
+        np.testing.assert_allclose(
+            quantile_lower.predict(data["X_test"]) - lower,
+            np.sort(cp._scores)[k - 1],
+        )
+
+    def test_unbounded_when_calibration_too_small(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        """With 9 calibration rows, 95% coverage needs an infinite interval."""
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        cp.fit(data["X_train"], data["y_train"],
+               data["X_calib"][:9], data["y_calib"][:9])
+        lower, upper = cp.predict(data["X_test"], confidence=0.95)
+        assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
+
 
 class TestCrepesConformalClassifier:
     @pytest.mark.parametrize("method", ["standard", "class_cond", "mondrian"])

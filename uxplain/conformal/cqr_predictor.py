@@ -102,10 +102,16 @@ class CQRConformalPredictor:
 
         X = np.asarray(X)
 
-        alpha = 1 - confidence
-        # Finite-sample correction ensures valid marginal coverage
-        level = min((1 + 1 / self._n_calib) * (1 - alpha), 1.0)
-        adjustment = float(np.quantile(self._scores, level))
+        # Conformal quantile (Romano et al., 2019): the ceil((n + 1) * confidence)-th
+        # smallest score. When that rank exceeds n, no finite adjustment
+        # guarantees coverage, so the interval is unbounded. The epsilon stops
+        # floating-point noise in the product from bumping the rank up by one.
+        n = self._n_calib
+        k = max(int(np.ceil((n + 1) * confidence - 1e-9)), 1)
+        if k > n:
+            adjustment = np.inf
+        else:
+            adjustment = float(np.sort(self._scores)[k - 1])
 
         lower = self.lower_model.predict(X) - adjustment
         upper = self.upper_model.predict(X) + adjustment
