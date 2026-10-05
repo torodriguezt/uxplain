@@ -204,8 +204,19 @@ class TestPipelinePlotDirect:
             result.explanation_values,
             X=data["X_test"][:5],
             kind=["bar"],
+            show=False,
         )
-        assert figs is None or isinstance(figs, dict)
+        assert set(figs) == {"bar"}
+
+    def test_plot_pdp_direct(self, regression_pdp_result):
+        pipeline, result = regression_pdp_result
+        figs = pipeline.plot(result.explanation_values, kind=["pdp"], show=False)
+        assert set(figs) == {"pdp"}
+
+    def test_plot_lime_direct(self, regression_lime_result):
+        pipeline, result = regression_lime_result
+        figs = pipeline.plot(result.explanation_values, kind=["local"], show=False)
+        assert set(figs) == {"local"}
 
     def test_plot_classification_direct(self, classification_shap_result, classification_data):
         pipeline, result = classification_shap_result

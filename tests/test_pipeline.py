@@ -100,6 +100,23 @@ class TestFitPredict:
         lower_95, upper_95 = pipeline.predict(data["X_test"], confidence=0.95)
         assert (upper_95 - lower_95).mean() > (upper_90 - lower_90).mean()
 
+    @pytest.mark.parametrize("calib", ["X_calib", "y_calib"])
+    def test_fit_requires_both_calib_arrays(self, data, calib):
+        pipeline = _make_pipeline()
+        with pytest.raises(ValueError, match="both X_calib and y_calib"):
+            pipeline.fit(data["X_train"], data["y_train"], **{calib: data[calib]})
+
+    @pytest.mark.parametrize("confidence", [0, 1, 90, -0.1])
+    def test_confidence_must_be_a_fraction(self, confidence):
+        with pytest.raises(ValueError, match=r"confidence must be in \(0, 1\)"):
+            _make_pipeline(confidence=confidence)
+
+    def test_predict_confidence_override_validated(self, data):
+        pipeline = _make_pipeline()
+        pipeline.fit(data["X_train"], data["y_train"])
+        with pytest.raises(ValueError, match="confidence must be in"):
+            pipeline.predict(data["X_test"], confidence=95)
+
     def test_feature_names_from_dataframe(self, data):
         cols = ["a", "b", "c", "d"]
         X_df = pd.DataFrame(data["X_train"], columns=cols)
