@@ -115,8 +115,10 @@ class PDPUncertaintyExplainer:
         method : str
             PDP computation method. ``"brute"`` works for any estimator.
 
-        features : list of int, optional
-            Feature indices to explain. Defaults to all features.
+        features : list, optional
+            Features to explain, in the format accepted by ``fit()``. Used
+            whenever ``fit()`` is called without ``features``. Defaults to all
+            features.
 
         grid_resolution : int
             Number of grid points per 1D feature.
@@ -148,6 +150,9 @@ class PDPUncertaintyExplainer:
         self.confidence = confidence
         self.method = method
         self.features = features
+        # fit() overwrites self.features with the resolved list; keep the
+        # constructor's choice to fall back on when fit() gets features=None.
+        self._default_features = features
         self.grid_resolution = grid_resolution
         self.grid_resolution_2d = grid_resolution_2d
         self.percentiles = percentiles
@@ -181,7 +186,7 @@ class PDPUncertaintyExplainer:
             - Tuples of two → 2D interaction heatmap (e.g. ``[(0, 1)]``)
             - Both together → ``[0, 1, (0, 1)]``
 
-            Unchanged when ``None``.
+            Falls back to the value set at ``__init__`` when ``None``.
         kind : {"average", "individual", "both"}, optional
             Overrides the value set at ``__init__``. Unchanged when ``None``.
         grid_resolution : int, optional
@@ -197,6 +202,8 @@ class PDPUncertaintyExplainer:
         if percentiles is not None:
             self.percentiles = percentiles
 
+        if features is None:
+            features = self._default_features
         if features is None:
             self.features = None
             self.feature_pairs = None

@@ -11,7 +11,7 @@ from uxplain import (
     LIMEExplanation,
     UncertaintyExplanationPipeline,
 )
-from uxplain.explainability.pdp_explainer import PDPExplanation
+from uxplain.explainability.pdp_explainer import PDPExplanation, PDPUncertaintyExplainer
 from uxplain.plots import generate_pdp_plots
 import shap
 
@@ -191,6 +191,20 @@ class TestExplainPDP:
             pipeline.explain(
                 data["X_test"][:3], show_plots=False, plot_kind="beeswarm"
             )
+
+    def test_constructor_features_survive_fit(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        explainer = PDPUncertaintyExplainer(pipeline.cp, features=[0, 2])
+        explainer.fit(data["X_calib"])
+        assert explainer.explain(data["X_test"][:10]).features == [0, 2]
+
+    def test_features_reset_when_explain_omits_them(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        pipeline.explain(data["X_test"][:10], show_plots=False, features=[1])
+        result = pipeline.explain(data["X_test"][:10], show_plots=False)
+        assert result.explanation_values.features == [0, 1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
