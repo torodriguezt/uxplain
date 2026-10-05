@@ -181,3 +181,29 @@ class TestCrepesConformalClassifier:
         np.testing.assert_allclose(
             proba, classifier.predict_proba(classification_data["X_test"]),
         )
+
+    def test_p_values_deterministic_by_default(self, classification_data, classifier):
+        """Each row's p-values depend on that row only: no draw, no batch order."""
+        cp = CrepesConformalClassifier(classifier)
+        cp.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        X = classification_data["X_test"]
+        p = cp.predict_p(X)
+        np.testing.assert_array_equal(cp.predict_p(X), p)
+        np.testing.assert_array_equal(cp.predict_p(X[::-1])[::-1], p)
+
+    def test_smoothing_is_opt_in(self, classification_data, classifier):
+        """Smoothed p-values never exceed the conservative non-smoothed ones."""
+        cp = CrepesConformalClassifier(classifier)
+        cp.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        X = classification_data["X_test"]
+        p_plain = cp.predict_p(X)
+        cp.smoothing = True
+        p_smooth = cp.predict_p(X)
+        assert np.all(p_smooth <= p_plain)
+        assert np.any(p_smooth < p_plain)

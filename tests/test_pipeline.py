@@ -428,6 +428,36 @@ class TestClassificationPipeline:
             3, classification_data["X_test"].shape[1],
         )
 
+    def test_prediction_set_consistent_with_p_values(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain(
+            classification_data["X_test"][:20], show_plots=False,
+        )
+        np.testing.assert_array_equal(
+            result.prediction_set, result.p_values >= 1 - pipeline.confidence,
+        )
+
+    def test_explanation_is_deterministic(self, classification_data, classifier):
+        """Explaining the same rows twice must give the same attributions."""
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+            uncertainty_metric="credibility",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        X = classification_data["X_test"][:5]
+        first = pipeline.explain(X, show_plots=False).explanation_values.values
+        second = pipeline.explain(X, show_plots=False).explanation_values.values
+        np.testing.assert_array_equal(first, second)
+
     def test_explain_uncertainty_alias(self, classification_data, classifier):
         pipeline = UncertaintyExplanationPipeline(
             model=classifier, task="classification",
