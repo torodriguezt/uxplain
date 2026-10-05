@@ -45,6 +45,7 @@ dependencies = [
     "crepes>=0.9.1",
     "lime>=0.2",
     "matplotlib>=3.8",
+    "pandas>=1.5",
 ]
 
 [project.urls]
