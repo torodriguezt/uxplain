@@ -122,19 +122,13 @@ class TestPipelineMetric:
 # ---------------------------------------------------------------------------
 
 class TestClassificationMetrics:
-    # crepes' WrapClassifier uses *smoothed* p-values that consume the global
-    # NumPy RNG, so two consecutive calls give different outputs. We seed
-    # immediately before each call so both paths see the same RNG state.
-
     def test_set_size_matches_predict_set_sum(
         self, fitted_classifier_cp, classification_data,
     ):
         fn = make_uncertainty_function(
             fitted_classifier_cp, confidence=0.9, metric="set_size",
         )
-        np.random.seed(0)
         actual = fn(classification_data["X_test"])
-        np.random.seed(0)
         expected = fitted_classifier_cp.predict_set(
             classification_data["X_test"], confidence=0.9,
         ).sum(axis=1).astype(float)
@@ -158,9 +152,7 @@ class TestClassificationMetrics:
         fn = make_uncertainty_function(
             fitted_classifier_cp, confidence=0.9, metric="credibility",
         )
-        np.random.seed(0)
         actual = fn(classification_data["X_test"])
-        np.random.seed(0)
         expected = fitted_classifier_cp.predict_p(
             classification_data["X_test"],
         ).max(axis=1)
@@ -181,9 +173,7 @@ class TestClassificationMetrics:
         fn = make_uncertainty_function(
             fitted_classifier_cp, confidence=0.9, metric="confidence",
         )
-        np.random.seed(0)
         actual = fn(classification_data["X_test"])
-        np.random.seed(0)
         p_sorted = np.sort(
             fitted_classifier_cp.predict_p(classification_data["X_test"]), axis=1,
         )

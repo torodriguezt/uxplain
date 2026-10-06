@@ -11,7 +11,7 @@ from uxplain import (
     LIMEExplanation,
     UncertaintyExplanationPipeline,
 )
-from uxplain.explainability.pdp_explainer import PDPExplanation
+from uxplain.explainability.pdp_explainer import PDPExplanation, PDPUncertaintyExplainer
 from uxplain.plots import generate_pdp_plots
 import shap
 
@@ -99,6 +99,23 @@ class TestFitPredict:
         lower_90, upper_90 = pipeline.predict(data["X_test"], confidence=0.90)
         lower_95, upper_95 = pipeline.predict(data["X_test"], confidence=0.95)
         assert (upper_95 - lower_95).mean() > (upper_90 - lower_90).mean()
+
+    @pytest.mark.parametrize("calib", ["X_calib", "y_calib"])
+    def test_fit_requires_both_calib_arrays(self, data, calib):
+        pipeline = _make_pipeline()
+        with pytest.raises(ValueError, match="both X_calib and y_calib"):
+            pipeline.fit(data["X_train"], data["y_train"], **{calib: data[calib]})
+
+    @pytest.mark.parametrize("confidence", [0, 1, 90, -0.1])
+    def test_confidence_must_be_a_fraction(self, confidence):
+        with pytest.raises(ValueError, match=r"confidence must be in \(0, 1\)"):
+            _make_pipeline(confidence=confidence)
+
+    def test_predict_confidence_override_validated(self, data):
+        pipeline = _make_pipeline()
+        pipeline.fit(data["X_train"], data["y_train"])
+        with pytest.raises(ValueError, match="confidence must be in"):
+            pipeline.predict(data["X_test"], confidence=95)
 
     def test_feature_names_from_dataframe(self, data):
         cols = ["a", "b", "c", "d"]
@@ -191,6 +208,20 @@ class TestExplainPDP:
             pipeline.explain(
                 data["X_test"][:3], show_plots=False, plot_kind="beeswarm"
             )
+
+    def test_constructor_features_survive_fit(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        explainer = PDPUncertaintyExplainer(pipeline.cp, features=[0, 2])
+        explainer.fit(data["X_calib"])
+        assert explainer.explain(data["X_test"][:10]).features == [0, 2]
+
+    def test_features_reset_when_explain_omits_them(self, data):
+        pipeline = _make_pipeline(xai_method="pdp")
+        pipeline.fit(data["X_train"], data["y_train"])
+        pipeline.explain(data["X_test"][:10], show_plots=False, features=[1])
+        result = pipeline.explain(data["X_test"][:10], show_plots=False)
+        assert result.explanation_values.features == [0, 1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +458,36 @@ class TestClassificationPipeline:
         assert result.explanation_values.local_coefficients.shape == (
             3, classification_data["X_test"].shape[1],
         )
+
+    def test_prediction_set_consistent_with_p_values(
+        self, classification_data, classifier,
+    ):
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        result = pipeline.explain(
+            classification_data["X_test"][:20], show_plots=False,
+        )
+        np.testing.assert_array_equal(
+            result.prediction_set, result.p_values >= 1 - pipeline.confidence,
+        )
+
+    def test_explanation_is_deterministic(self, classification_data, classifier):
+        """Explaining the same rows twice must give the same attributions."""
+        pipeline = UncertaintyExplanationPipeline(
+            model=classifier, task="classification",
+            uncertainty_metric="credibility",
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+        )
+        X = classification_data["X_test"][:5]
+        first = pipeline.explain(X, show_plots=False).explanation_values.values
+        second = pipeline.explain(X, show_plots=False).explanation_values.values
+        np.testing.assert_array_equal(first, second)
 
     def test_explain_uncertainty_alias(self, classification_data, classifier):
         pipeline = UncertaintyExplanationPipeline(

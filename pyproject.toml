@@ -45,12 +45,13 @@ dependencies = [
     "crepes>=0.9.1",
     "lime>=0.2",
     "matplotlib>=3.8",
+    "pandas>=1.5",
 ]
 
 [project.urls]
-Homepage = "https://github.com/vseguro/uxplain"
-Repository = "https://github.com/vseguro/uxplain"
-"Bug Tracker" = "https://github.com/vseguro/uxplain/issues"
+Homepage = "https://github.com/torodriguezt/uxplain"
+Repository = "https://github.com/torodriguezt/uxplain"
+"Bug Tracker" = "https://github.com/torodriguezt/uxplain/issues"
 
 [project.optional-dependencies]
 dev = [

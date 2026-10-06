@@ -6,10 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.inspection import PartialDependenceDisplay, partial_dependence
+from sklearn.inspection import partial_dependence
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
@@ -75,9 +74,6 @@ class PDPExplanation:
     values_2d: list[np.ndarray] | None = field(default=None)
     grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
     metric: str = field(default="width")
-    pd_results_raw: list | None = field(default=None)
-    deciles_: dict | None = field(default=None)
-    display_2d_: object | None = field(default=None)
 
 
 class PDPUncertaintyExplainer:
@@ -119,8 +115,10 @@ class PDPUncertaintyExplainer:
         method : str
             PDP computation method. ``"brute"`` works for any estimator.
 
-        features : list of int, optional
-            Feature indices to explain. Defaults to all features.
+        features : list, optional
+            Features to explain, in the format accepted by ``fit()``. Used
+            whenever ``fit()`` is called without ``features``. Defaults to all
+            features.
 
         grid_resolution : int
             Number of grid points per 1D feature.
@@ -152,6 +150,9 @@ class PDPUncertaintyExplainer:
         self.confidence = confidence
         self.method = method
         self.features = features
+        # fit() overwrites self.features with the resolved list; keep the
+        # constructor's choice to fall back on when fit() gets features=None.
+        self._default_features = features
         self.grid_resolution = grid_resolution
         self.grid_resolution_2d = grid_resolution_2d
         self.percentiles = percentiles
@@ -179,13 +180,13 @@ class PDPUncertaintyExplainer:
         X_background : np.ndarray
             Data used to set the grid range for each feature.
         features : list, optional
-            Mixed list accepted by ``PartialDependenceDisplay.from_estimator``:
+            Mixed list of 1D features and 2D interaction pairs:
 
             - Integers or strings → 1D PDP (e.g. ``[0, 1, "age"]``)
             - Tuples of two → 2D interaction heatmap (e.g. ``[(0, 1)]``)
             - Both together → ``[0, 1, (0, 1)]``
 
-            Unchanged when ``None``.
+            Falls back to the value set at ``__init__`` when ``None``.
         kind : {"average", "individual", "both"}, optional
             Overrides the value set at ``__init__``. Unchanged when ``None``.
         grid_resolution : int, optional
@@ -201,6 +202,8 @@ class PDPUncertaintyExplainer:
         if percentiles is not None:
             self.percentiles = percentiles
 
+        if features is None:
+            features = self._default_features
         if features is None:
             self.features = None
             self.feature_pairs = None
@@ -239,9 +242,8 @@ class PDPUncertaintyExplainer:
         """
         Compute partial dependence for each feature.
 
-        Uses ``PartialDependenceDisplay.from_estimator`` which accepts a
-        mixed feature list (ints for 1D, tuples for 2D) in a single call,
-        enabling parallelism via ``n_jobs``.
+        1D features and 2D interaction pairs are computed separately, the
+        latter on the coarser ``grid_resolution_2d`` grid.
 
         Parameters
         ----------
@@ -272,15 +274,12 @@ class PDPUncertaintyExplainer:
         values = []
         grid_values = []
         individual = [] if self.kind in ("individual", "both") else None
-        pd_bunches = []
-        deciles = {}
-        X_arr = np.asarray(X)
 
         # When kind="individual" we still need average values for pdp plots,
         # so internally request "both" and always populate values.
         internal_kind = "both" if self.kind == "individual" else self.kind
 
-        for i, feature in enumerate(features_1d):
+        for feature in features_1d:
             pd_result = partial_dependence(
                 self._estimator,
                 X,
@@ -290,35 +289,29 @@ class PDPUncertaintyExplainer:
                 percentiles=self.percentiles,
                 kind=internal_kind,
             )
-            pd_bunches.append(pd_result)
-            deciles[i] = np.percentile(X_arr[:, feature], np.arange(10, 100, 10))
             grid_values.append(pd_result["grid_values"][0])
             values.append(pd_result["average"][0])
             if self.kind in ("individual", "both"):
                 individual.append(pd_result["individual"][0])
 
-        # 2D: PartialDependenceDisplay.from_estimator with reduced grid
+        # 2D interactions, on a coarser grid (cost grows as grid_resolution_2d^2)
         values_2d = []
         grid_values_2d = []
 
-        display_2d = None
-        if feature_pairs:
-            with plt.ioff():
-                display_2d = PartialDependenceDisplay.from_estimator(
-                    self._estimator,
-                    X,
-                    features=feature_pairs,
-                    method=self.method,
-                    grid_resolution=self.grid_resolution_2d,
-                    percentiles=self.percentiles,
-                    kind="average",
-                    n_jobs=self.n_jobs,
-                    feature_names=self.feature_names,
-                )
-            plt.close(display_2d.figure_)
-            for result in display_2d.pd_results:
-                values_2d.append(result["average"][0])
-                grid_values_2d.append((result["grid_values"][0], result["grid_values"][1]))
+        for pair in feature_pairs:
+            pd_result = partial_dependence(
+                self._estimator,
+                X,
+                features=[pair],
+                method=self.method,
+                grid_resolution=self.grid_resolution_2d,
+                percentiles=self.percentiles,
+                kind="average",
+            )
+            values_2d.append(pd_result["average"][0])
+            grid_values_2d.append(
+                (pd_result["grid_values"][0], pd_result["grid_values"][1])
+            )
 
         # PDP-based importance (Greenwell et al., 2018): flatness of the
         # averaged curve. ddof=0 keeps it well-defined for single-point grids.
@@ -335,9 +328,6 @@ class PDPUncertaintyExplainer:
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
             metric=self.metric,
-            pd_results_raw=pd_bunches,
-            deciles_=deciles,
-            display_2d_=display_2d,
         )
 
         if self.feature_names is not None:

@@ -27,10 +27,9 @@ clean:
 	find . -type d -name "__pycache__" -delete
 
 
-## Lint using ruff (use `make format` to do formatting)
+## Lint using ruff, as CI does (use `make format` to format)
 .PHONY: lint
 lint:
-	ruff format --check
 	ruff check
 
 ## Format source code with ruff
@@ -50,17 +49,6 @@ create_environment:
 	@echo ">>> New virtualenv created. Activate with:\nworkon $(PROJECT_NAME)"
 	
 
-
-
-#################################################################################
-# PROJECT RULES                                                                 #
-#################################################################################
-
-
-## Make dataset
-.PHONY: data
-data: requirements
-	$(PYTHON_INTERPRETER) uxplain/dataset.py
 
 
 #################################################################################

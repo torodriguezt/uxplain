@@ -33,6 +33,15 @@ class CrepesConformalClassifier:
         - ``"standard"``    : basic (marginal) conformal classifier
         - ``"class_cond"``  : class-conditional Mondrian (per-class coverage)
         - ``"mondrian"``    : Mondrian categorizer based on predicted class
+    random_state : int, optional
+        Seed for the tie-breaking draws of smoothed p-values. Ignored when
+        ``smoothing=False``.
+    smoothing : bool, default=False
+        Use smoothed p-values. They give exact coverage, but every row gets a
+        fresh uniform tie-breaker on each call, so the same input can come back
+        with a different set size or credibility, and the explainers attribute
+        that noise to features. Non-smoothed p-values are deterministic and
+        conservative (coverage at least the nominal level).
 
     Examples
     --------
@@ -48,10 +57,12 @@ class CrepesConformalClassifier:
         model,
         method: ClassificationConformalMethod = "standard",
         random_state: int | None = None,
+        smoothing: bool = False,
     ):
         self.model = model
         self.method = method
         self.random_state = random_state
+        self.smoothing = smoothing
         self.wrapper = None
         self.classes_ = None
 
@@ -120,7 +131,8 @@ class CrepesConformalClassifier:
         # labels=False keeps the binary-array output; since crepes 0.9.1
         # the default (labels=True) returns a list of lists of labels.
         return self.wrapper.predict_set(
-            X, confidence=confidence, seed=self.random_state, labels=False,
+            X, confidence=confidence, smoothing=self.smoothing,
+            seed=self.random_state, labels=False,
         ).astype(bool)
 
     def predict_p(
@@ -139,7 +151,9 @@ class CrepesConformalClassifier:
             raise RuntimeError("CrepesConformalClassifier not fitted.")
 
         X = np.asarray(X)
-        return self.wrapper.predict_p(X, seed=self.random_state)
+        return self.wrapper.predict_p(
+            X, smoothing=self.smoothing, seed=self.random_state,
+        )
 
     def predict_proba(
         self,

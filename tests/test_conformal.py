@@ -103,6 +103,29 @@ class TestCQRConformalPredictor:
         width_95 = (upper_95 - lower_95).mean()
         assert width_95 > width_90
 
+    def test_adjustment_is_exact_conformal_quantile(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        """The offset is the ceil((n + 1) * confidence)-th smallest score."""
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        k = int(np.ceil((len(data["y_calib"]) + 1) * 0.9))
+        lower, _ = cp.predict(data["X_test"], confidence=0.9)
+        np.testing.assert_allclose(
+            quantile_lower.predict(data["X_test"]) - lower,
+            np.sort(cp._scores)[k - 1],
+        )
+
+    def test_unbounded_when_calibration_too_small(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        """With 9 calibration rows, 95% coverage needs an infinite interval."""
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        cp.fit(data["X_train"], data["y_train"],
+               data["X_calib"][:9], data["y_calib"][:9])
+        lower, upper = cp.predict(data["X_test"], confidence=0.95)
+        assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
+
 
 class TestCrepesConformalClassifier:
     @pytest.mark.parametrize("method", ["standard", "class_cond", "mondrian"])
@@ -181,3 +204,29 @@ class TestCrepesConformalClassifier:
         np.testing.assert_allclose(
             proba, classifier.predict_proba(classification_data["X_test"]),
         )
+
+    def test_p_values_deterministic_by_default(self, classification_data, classifier):
+        """Each row's p-values depend on that row only: no draw, no batch order."""
+        cp = CrepesConformalClassifier(classifier)
+        cp.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        X = classification_data["X_test"]
+        p = cp.predict_p(X)
+        np.testing.assert_array_equal(cp.predict_p(X), p)
+        np.testing.assert_array_equal(cp.predict_p(X[::-1])[::-1], p)
+
+    def test_smoothing_is_opt_in(self, classification_data, classifier):
+        """Smoothed p-values never exceed the conservative non-smoothed ones."""
+        cp = CrepesConformalClassifier(classifier)
+        cp.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        X = classification_data["X_test"]
+        p_plain = cp.predict_p(X)
+        cp.smoothing = True
+        p_smooth = cp.predict_p(X)
+        assert np.all(p_smooth <= p_plain)
+        assert np.any(p_smooth < p_plain)

@@ -167,6 +167,7 @@ class UncertaintyExplanationPipeline:
         upper_model=None,
         conformal_predictor: ConformalPredictorProtocol | None = None,
         explainer: UncertaintyExplainerProtocol | None = None,
+        fast_shap: bool = True,
     ):
         """
         Initialize pipeline.
@@ -224,8 +225,16 @@ class UncertaintyExplanationPipeline:
 
         explainer : optional
             Custom explainer instance. Overrides ``xai_method`` when provided.
+
+        fast_shap : bool
+            When ``xai_method="shap"``, use exact TreeSHAP on the component
+            models for metrics that are affine in them (e.g. CQR interval
+            width, which is the difference of the two quantile models). Falls
+            back to the generic explainer whenever that does not apply. Set to
+            ``False`` to always use the generic path.
         """
 
+        self._check_confidence(confidence)
         self.confidence = confidence
         self.xai_method = xai_method
         self.random_state = random_state
@@ -304,6 +313,7 @@ class UncertaintyExplanationPipeline:
                 cp=self.cp,
                 confidence=self.confidence,
                 metric=self.uncertainty_metric,
+                fast_path=fast_shap,
             )
         elif xai_method == "lime":
             self.explainer = LimeUncertaintyExplainer(
@@ -367,10 +377,15 @@ class UncertaintyExplanationPipeline:
             X_calib = np.asarray(X_calib)
         if y_calib is not None:
             y_calib = np.asarray(y_calib)
+        if (X_calib is None) != (y_calib is None):
+            raise ValueError(
+                "Pass both X_calib and y_calib, or neither to split the "
+                "calibration set off X_train automatically."
+            )
 
         # Auto-split if calibration set not provided.
         # Stratify on y for classification to avoid missing classes in calib.
-        if X_calib is None or y_calib is None:
+        if X_calib is None:
             seed = random_state if random_state is not None else self.random_state
             stratify = y_train if self.task == "classification" else None
             X_train, X_calib, y_train, y_calib = train_test_split(
@@ -422,6 +437,7 @@ class UncertaintyExplanationPipeline:
         self._check_X(X)
 
         conf = self.confidence if confidence is None else confidence
+        self._check_confidence(conf)
         X_arr = np.asarray(X)
 
         if self.task == "classification":
@@ -541,7 +557,8 @@ class UncertaintyExplanationPipeline:
         waterfall_index: int | None = None,
         figsize: tuple[float, float] | None = None,
         result=None,
-    ):
+        show: bool = True,
+    ) -> dict:
         """
         Generate plot(s) from existing explanation results.
 
@@ -551,34 +568,44 @@ class UncertaintyExplanationPipeline:
             Figure size in inches forwarded to the underlying plot
             function. When ``None``, each plot function applies its
             own default.
+        show : bool
+            Display the figures. Pass ``False`` to only build them, e.g. to
+            save or restyle them first.
+
+        Returns
+        -------
+        dict
+            Maps each plot kind to its ``matplotlib`` figure.
         """
 
         kinds = self._resolve_plot_kinds(kind, X=X)
 
         if isinstance(self.explainer, PDPUncertaintyExplainer):
-            generate_pdp_plots(
+            return generate_pdp_plots(
                 explanation_values,
                 kinds=kinds,
                 feature_names=self._feature_names,
                 figsize=figsize,
+                show=show,
             )
-        elif isinstance(self.explainer, LimeUncertaintyExplainer):
-            generate_lime_plots(
+        if isinstance(self.explainer, LimeUncertaintyExplainer):
+            return generate_lime_plots(
                 explanation_values,
                 kinds=kinds,
                 sample_index=waterfall_index,
                 figsize=figsize,
+                show=show,
             )
-        else:
-            shap_kwargs = {"figsize": figsize} if figsize is not None else {}
-            generate_shap_plots(
-                explanation_values,
-                X,
-                kinds=kinds,
-                feature_names=self._feature_names,
-                waterfall_index=waterfall_index,
-                **shap_kwargs,
-            )
+        shap_kwargs = {"figsize": figsize} if figsize is not None else {}
+        return generate_shap_plots(
+            explanation_values,
+            X,
+            kinds=kinds,
+            feature_names=self._feature_names,
+            waterfall_index=waterfall_index,
+            show=show,
+            **shap_kwargs,
+        )
 
 
     def _validate_metric(self, metric, task):
@@ -591,6 +618,13 @@ class UncertaintyExplanationPipeline:
             raise ValueError(
                 f"uncertainty_metric='{metric}' is not valid for "
                 f"regression. Choose from {REGRESSION_METRICS}."
+            )
+
+    def _check_confidence(self, confidence):
+        if not 0 < confidence < 1:
+            raise ValueError(
+                f"confidence must be in (0, 1), got {confidence}. Pass the "
+                "coverage level as a fraction, e.g. 0.9 for 90%."
             )
 
     def _check_is_fitted(self):
