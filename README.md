@@ -1,21 +1,24 @@
 # uxplain
 
-**Why is your model uncertain about *this* prediction?**
+Explainability for conformal prediction uncertainty.
 
-Conformal prediction tells you *how* uncertain a model is — a prediction interval for
-regression, a prediction set for classification. `uxplain` goes one step further: it turns that
-uncertainty into a number and explains it with SHAP, PDP, or LIME, so you also learn **which
-features drive it**.
+`uxplain` fits a split-conformal predictor on any scikit-learn estimator, reduces its output to a
+scalar uncertainty summary *u(x)*, and attributes *u(x)* to the input features with SHAP, PDP/ICE
+or LIME. The result tells you which features make the model more or less uncertain, not just
+which ones drive its predictions.
 
-```
-model → conformal predictor → uncertainty metric → XAI → plots
-        intervals / sets       width / set size     shap · pdp · lime
-```
+- **Conformal backends:** [crepes](https://github.com/henrikbostrom/crepes) (standard,
+  normalized, Mondrian) and conformalized quantile regression (CQR) for regression; crepes
+  (standard, class-conditional, Mondrian) for classification.
+- **Summaries *u(x)*:** interval `width`, `lower`, `upper` and `midpoint` for regression;
+  `set_size`, `credibility` and `confidence` for classification.
+- **Explainers:** SHAP, with an exact TreeSHAP shortcut when *u* is affine in tree-ensemble
+  components (e.g. CQR width); PDP/ICE, including 2D interactions; LIME.
 
 ## Install
 
 ```bash
-pip install uxplain     # Python ≥ 3.10
+pip install uxplain     # Python >= 3.10
 ```
 
 ## Use
@@ -24,39 +27,27 @@ pip install uxplain     # Python ≥ 3.10
 from sklearn.ensemble import RandomForestRegressor
 from uxplain import UncertaintyExplanationPipeline
 
-pipe = UncertaintyExplanationPipeline(model=RandomForestRegressor())
-pipe.fit(X_train, y_train)
+pipe = UncertaintyExplanationPipeline(
+    model=RandomForestRegressor(),
+    confidence=0.9,              # nominal coverage
+    xai_method="shap",           # "shap" | "pdp" | "lime"
+    uncertainty_metric="width",  # the summary u(x) to explain
+)
+pipe.fit(X_train, y_train)       # holds out a calibration split unless you pass one
 result = pipe.explain(X_test)
 
-result.lower, result.upper   # prediction interval
-result.interval_width        # what the explanation is about
+result.lower, result.upper       # conformal intervals
+result.explanation_values        # attributions of u(x)
 ```
 
-`explain()` runs the conformal predictor, the explainer, and the plots in one call. Pass a
-classifier instead and you get prediction sets (`result.prediction_set`, `result.p_values`,
-`result.set_size`) — the task is detected from the model, and `fit()` holds out its own
-calibration split unless you give it one.
-
-From there, everything is a constructor argument:
-
-```python
-UncertaintyExplanationPipeline(
-    model=model,
-    confidence=0.9,             # nominal coverage
-    xai_method="shap",          # "shap" | "pdp" | "lime"
-    uncertainty_metric="width", # regression: width | lower | upper | midpoint
-                                # classification: set_size | credibility | confidence
-    conformal_method=None,      # crepes methods, or pass your own conformal_predictor
-)
-```
-
-Worked examples for both tasks are in [`notebooks/`](notebooks/).
+Pass a classifier and the task switches to prediction sets (`result.prediction_set`,
+`result.p_values`, `result.set_size`). Worked examples are in [`notebooks/`](notebooks/).
 
 ## Authors
 
-- **Veronica Seguro Varela** — MSc student in Statistical Sciences, Universidad Nacional de Colombia, Medellín
-- **Tomas Rodriguez Taborda** — Student in Informatics and Computer Science Engineering & Statistics, Universidad Nacional de Colombia, Medellín
-- **Rafael Izbicki** — PhD, Professor at Federal University of São Carlos, São Carlos
-- **Johnatan Cardona Jimenez** — PhD, Professor at Universidad Nacional de Colombia, Medellín
+- **Veronica Seguro Varela** — Universidad Nacional de Colombia, Medellín
+- **Tomas Rodriguez Taborda** — Universidad Nacional de Colombia, Medellín
+- **Rafael Izbicki** — Federal University of São Carlos
+- **Johnatan Cardona Jimenez** — Universidad Nacional de Colombia, Medellín
 
 MIT License.
