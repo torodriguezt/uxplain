@@ -11,6 +11,7 @@ import numpy as np
 from sklearn.base import is_classifier
 from sklearn.model_selection import train_test_split
 
+from .conformal._validation import check_confidence
 from .conformal.cqr_predictor import CQRConformalPredictor
 from .conformal.crepes_classifier import (
     ClassificationConformalMethod,
@@ -29,6 +30,7 @@ from .plots import (
     generate_shap_plots,
 )
 from .protocols import (
+    ConformalClassifierProtocol,
     ConformalPredictorProtocol,
     UncertaintyExplainerProtocol,
 )
@@ -103,6 +105,10 @@ def _detect_task(
 ) -> Literal["regression", "classification"]:
     """Resolve ``task="auto"`` from the model / predictor."""
 
+    if task not in ("auto", "regression", "classification"):
+        raise ValueError(
+            f"Unknown task '{task}'. Choose from 'auto', 'regression', or 'classification'."
+        )
     if task != "auto":
         return task
     if conformal_predictor is not None:
@@ -165,7 +171,9 @@ class UncertaintyExplanationPipeline:
         random_state: int | None = None,
         lower_model=None,
         upper_model=None,
-        conformal_predictor: ConformalPredictorProtocol | None = None,
+        conformal_predictor: (
+            ConformalPredictorProtocol | ConformalClassifierProtocol | None
+        ) = None,
         explainer: UncertaintyExplainerProtocol | None = None,
         fast_shap: bool = True,
     ):
@@ -213,7 +221,8 @@ class UncertaintyExplanationPipeline:
             ``xai_method != "lime"``.
 
         random_state : int, optional
-            Seed for the auto calibration split and LIME perturbation sampler.
+            Seed for the auto calibration split, SHAP permutation sampling,
+            and LIME perturbation sampler.
 
         lower_model, upper_model
             Quantile regressors for CQR. Required when
@@ -314,6 +323,7 @@ class UncertaintyExplanationPipeline:
                 confidence=self.confidence,
                 metric=self.uncertainty_metric,
                 fast_path=fast_shap,
+                random_state=random_state,
             )
         elif xai_method == "lime":
             self.explainer = LimeUncertaintyExplainer(
@@ -332,6 +342,7 @@ class UncertaintyExplanationPipeline:
         self._is_fitted = False
         self._explainer_kwargs = None
         self._feature_names = None
+        self._explicit_feature_names = getattr(self.explainer, "feature_names", None)
 
     def fit(
         self,
@@ -365,11 +376,21 @@ class UncertaintyExplanationPipeline:
             ``random_state`` for this call only.
         """
 
-        # Extract feature names from DataFrame before converting
-        if hasattr(X_train, "columns"):
-            self._feature_names = list(X_train.columns)
-            if hasattr(self.explainer, "feature_names"):
-                self.explainer.feature_names = self._feature_names
+        self._is_fitted = False
+        # Replace only names inferred by the pipeline; preserve custom labels.
+        feature_names = (
+            list(X_train.columns) if hasattr(X_train, "columns") else None
+        )
+        if hasattr(self.explainer, "feature_names"):
+            self.explainer.feature_names = (
+                feature_names if feature_names is not None else self._explicit_feature_names
+            )
+        self._feature_names = feature_names
+        self._check_X(X_train)
+        if X_calib is not None:
+            self._check_X(X_calib)
+        if X_background is not None:
+            self._check_X(X_background)
 
         X_train = np.asarray(X_train)
         y_train = np.asarray(y_train)
@@ -415,6 +436,7 @@ class UncertaintyExplanationPipeline:
         )
         self._is_fitted = True
         self._explainer_kwargs = None
+        return self
 
     def predict(
         self,
@@ -486,7 +508,9 @@ class UncertaintyExplanationPipeline:
                 "PDP does not support single-sample (local) explanations. "
                 "Use xai_method='shap' or 'lime' instead."
             )
-        features_kw = explainer_kwargs.get("features") or []
+        features_kw = explainer_kwargs.get("features")
+        if features_kw is None:
+            features_kw = []
         pairs = [f for f in features_kw if isinstance(f, tuple)]
         is_pdp = isinstance(self.explainer, PDPUncertaintyExplainer)
 
@@ -621,11 +645,7 @@ class UncertaintyExplanationPipeline:
             )
 
     def _check_confidence(self, confidence):
-        if not 0 < confidence < 1:
-            raise ValueError(
-                f"confidence must be in (0, 1), got {confidence}. Pass the "
-                "coverage level as a fraction, e.g. 0.9 for 90%."
-            )
+        check_confidence(confidence)
 
     def _check_is_fitted(self):
         if not self._is_fitted:
@@ -639,6 +659,12 @@ class UncertaintyExplanationPipeline:
             raise ValueError(
                 f"X must be 2D, got shape {X_arr.shape}"
             )
+        if (
+            self._feature_names is not None
+            and hasattr(X, "columns")
+            and list(X.columns) != self._feature_names
+        ):
+            raise ValueError("DataFrame columns must match the training columns in order.")
 
     def _resolve_plot_kinds(
         self,
