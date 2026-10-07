@@ -25,23 +25,51 @@ pip install uxplain     # Python >= 3.10
 
 ```python
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.datasets import make_regression
+from sklearn.model_selection import train_test_split
 from uxplain import UncertaintyExplanationPipeline
 
+X, y = make_regression(n_samples=300, n_features=4, noise=15, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+
 pipe = UncertaintyExplanationPipeline(
-    model=RandomForestRegressor(),
+    model=RandomForestRegressor(n_estimators=50, random_state=42),
     confidence=0.9,              # nominal coverage
     xai_method="shap",           # "shap" | "pdp" | "lime"
     uncertainty_metric="width",  # the summary u(x) to explain
+    random_state=42,
 )
 pipe.fit(X_train, y_train)       # holds out a calibration split unless you pass one
-result = pipe.explain(X_test)
+result = pipe.explain(X_test[:5], show_plots=False)
 
 result.lower, result.upper       # conformal intervals
 result.explanation_values        # attributions of u(x)
 ```
 
 Pass a classifier and the task switches to prediction sets (`result.prediction_set`,
-`result.p_values`, `result.set_size`). Worked examples are in [`notebooks/`](notebooks/).
+`result.p_values`, `result.set_size`). Worked examples are in
+[`notebooks/`](https://github.com/torodriguezt/uxplain/tree/main/notebooks),
+and the [getting-started guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md)
+covers calibration, classification and development.
+
+The explanations describe a scalar summary of the fitted conformal predictor.
+They do not estimate causal effects or give a coverage guarantee for the
+explanation itself. Coverage claims depend on the conformal method's assumptions,
+including an appropriate held-out calibration sample.
+
+## Development and release checks
+
+```bash
+python -m pip install -e ".[dev,release]"
+python -m ruff check .
+python -m pytest
+python -m build
+python -m twine check --strict dist/*
+```
+
+See the [release guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#releasing)
+for installation checks and the publication checklist. Building and testing these
+archives does not publish them to PyPI.
 
 ## Authors
 
