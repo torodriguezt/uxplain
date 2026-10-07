@@ -16,16 +16,24 @@ pip install uxplain
 
 ```python
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.datasets import make_regression
+from sklearn.model_selection import train_test_split
 from uxplain import UncertaintyExplanationPipeline
 
-pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
+X, y = make_regression(n_samples=300, n_features=4, noise=15, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+pipeline = UncertaintyExplanationPipeline(
+    model=RandomForestRegressor(n_estimators=50, random_state=42),
+    random_state=42,
+)
 pipeline.fit(X_train, y_train)
-result = pipeline.explain(X_test)
+result = pipeline.explain(X_test[:5], show_plots=False)
 ```
 
-See the [README](https://github.com/torodriguezt/uxplain#readme) for the full API:
-conformal predictors, classification pipelines, explainability backends, plot kinds,
-and the custom-component protocols.
+See [Getting started](getting-started.md) for runnable examples, calibration,
+classification, development and release checks. The
+[notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks) cover the
+explainability backends and plots.
 
 ## Links
 
