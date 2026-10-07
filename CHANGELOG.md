@@ -4,6 +4,37 @@ All notable changes to **uxplain** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - Unreleased
+
+### Added
+- PNAD Continua and GEIH dataset loaders, without bundling survey microdata.
+- Exact TreeSHAP for supported affine summaries of built-in conformal predictors,
+  with generic SHAP as the fallback.
+- Python 3.13 CI coverage and Linux/Windows distribution checks that install the
+  wheel and run the tests included in the source archive outside the checkout.
+- Runnable getting-started examples and release-validation instructions.
+
+### Fixed
+- Validate conformal methods, task names, coverage levels and calibration arrays;
+  accept single-column targets without broadcasting CQR calibration scores.
+- Return unbounded regression intervals for Mondrian groups absent from calibration.
+- Keep Mondrian assignments deterministic when scores tie and seed permutation
+  SHAP without changing the caller's NumPy random state.
+- Restrict the TreeSHAP shortcut to supported algebraic decompositions instead of
+  inferring global affinity from agreement on a finite sample.
+- Prevent target leakage for alternative dataset targets and reject ambiguous
+  joins of GEIH modules; preserve missing occupation and informality values.
+- Preserve DataFrame feature order and reset pipeline state on refitting.
+- Reject non-finite explanation targets explicitly, while allowing unbounded
+  conformal prediction intervals.
+- Plot single-observation SHAP slices and PDP interactions with constant features;
+  require an explicit baseline for SHAP waterfall plots.
+
+### Changed
+- Use SPDX license metadata and include tests in the source distribution.
+- The manuscript's replication results must be regenerated with this version
+  before submission; this entry describes a local release candidate.
+
 ## [0.2.3]
 
 ### Added
