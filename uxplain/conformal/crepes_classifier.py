@@ -11,6 +11,8 @@ from typing import Literal
 from crepes import WrapClassifier
 import numpy as np
 
+from ._validation import check_confidence, check_fit_data
+
 ClassificationConformalMethod = Literal[
     "standard",
     "class_cond",
@@ -59,6 +61,8 @@ class CrepesConformalClassifier:
         random_state: int | None = None,
         smoothing: bool = False,
     ):
+        if method not in ("standard", "class_cond", "mondrian"):
+            raise ValueError(f"Unknown conformal classification method '{method}'.")
         self.model = model
         self.method = method
         self.random_state = random_state
@@ -83,9 +87,17 @@ class CrepesConformalClassifier:
         3. Calibrate conformal classifier
         """
 
+        self.wrapper = None
+        self.classes_ = None
+        X_train, y_train, X_calib, y_calib = check_fit_data(
+            X_train, y_train, X_calib, y_calib,
+        )
+
         # Train
         self.model.fit(X_train, y_train)
         self.classes_ = np.asarray(self.model.classes_)
+        if not np.all(np.isin(y_calib, self.classes_)):
+            raise ValueError("y_calib contains classes absent from the fitted model.")
 
         self.wrapper = WrapClassifier(self.model)
 
@@ -127,6 +139,7 @@ class CrepesConformalClassifier:
         if self.wrapper is None:
             raise RuntimeError("CrepesConformalClassifier not fitted.")
 
+        check_confidence(confidence)
         X = np.asarray(X)
         # labels=False keeps the binary-array output; since crepes 0.9.1
         # the default (labels=True) returns a list of lists of labels.
