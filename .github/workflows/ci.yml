@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, demo, dev, prototype, prototype-classification, feature/classification-support]
   pull_request:
-    branches: [main, demo, dev, prototype, prototype-classification, feature/classification-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MPLBACKEND: Agg
 
 jobs:
   lint:
@@ -25,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -39,3 +44,48 @@ jobs:
 
       - name: Run tests with coverage
         run: pytest --tb=short --cov=uxplain --cov-report=term-missing
+
+  distribution:
+    name: Build and test distributions (${{ matrix.os }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build tools
+        run: python -m pip install build twine
+      - name: Build sdist and wheel from sdist
+        run: python -m build
+      - name: Validate metadata
+        run: python -m twine check --strict dist/*
+      - name: Install wheel and unpack sdist tests outside the checkout
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl pytest pytest-cov
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import tarfile
+
+          target = Path(os.environ["RUNNER_TEMP"]) / "uxplain-sdist"
+          target.mkdir()
+          with tarfile.open(next(Path("dist").glob("*.tar.gz"))) as archive:
+              archive.extractall(target, filter="data")
+          PY
+      - name: Test the installed wheel using the shipped tests
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/uxplain-sdist"/uxplain-*
+          python -I -c "import uxplain; print(uxplain.__version__, uxplain.__file__)"
+          python -I -m pytest --import-mode=importlib --tb=short tests
+          python -m pip check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions-${{ matrix.os }}
+          path: dist/*
