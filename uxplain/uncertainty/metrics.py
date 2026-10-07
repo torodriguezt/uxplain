@@ -6,7 +6,7 @@ output that can serve as the *target* of an explainer.
 
 Regression metrics reduce ``(lower, upper)`` to a single scalar:
 
-- ``"width"``    : ``upper - lower``           (how wide the interval is)
+- ``"width"``    : ``upper - lower``           (signed endpoint span)
 - ``"lower"``    : ``lower``                   (the pessimistic prediction)
 - ``"upper"``    : ``upper``                   (the optimistic prediction)
 - ``"midpoint"`` : ``(lower + upper) / 2``     (the central prediction)
@@ -28,6 +28,8 @@ from collections.abc import Callable
 from typing import Literal
 
 import numpy as np
+
+from ..conformal._validation import check_confidence
 
 RegressionMetric = Literal["width", "lower", "upper", "midpoint"]
 ClassificationMetric = Literal["set_size", "credibility", "confidence"]
@@ -68,6 +70,8 @@ def _credibility(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
 
 def _conformal_confidence(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
     p = np.sort(cp.predict_p(X), axis=1)
+    if p.shape[1] < 2:
+        raise ValueError("The confidence metric requires at least two classes.")
     # 1 - second-highest p-value (well-defined for n_classes >= 2)
     return 1.0 - p[:, -2]
 
@@ -81,6 +85,16 @@ _CLASSIFICATION_REDUCERS: dict[
 }
 
 
+def _finite_uncertainty(values):
+    if not np.all(np.isfinite(values)):
+        raise ValueError(
+            "Cannot explain non-finite uncertainty values. Increase calibration "
+            "data (including within Mondrian groups), lower confidence, or use "
+            "a predictor and metric with finite outputs."
+        )
+    return values
+
+
 def is_classifier_predictor(cp) -> bool:
     """Return True if ``cp`` exposes the conformal-classifier interface."""
 
@@ -91,7 +105,7 @@ def interval_width(
     lower: np.ndarray,
     upper: np.ndarray,
 ) -> np.ndarray:
-    """Compute interval width."""
+    """Compute the signed span; CQR empty sets may have a negative span."""
 
     return upper - lower
 
@@ -133,8 +147,11 @@ def make_uncertainty_function(
     -------
     Callable[[np.ndarray], np.ndarray]
         Function ``f(X) -> np.ndarray`` of shape ``(n_samples,)``.
+        Raises ``ValueError`` if the metric is non-finite, since the explainers
+        require finite targets. Predictions themselves may remain unbounded.
     """
 
+    check_confidence(confidence)
     if is_classifier_predictor(conformal_predictor):
         if metric not in _CLASSIFICATION_REDUCERS:
             raise ValueError(
@@ -144,7 +161,7 @@ def make_uncertainty_function(
         reducer = _CLASSIFICATION_REDUCERS[metric]
 
         def uncertainty_function(X: np.ndarray) -> np.ndarray:
-            return reducer(conformal_predictor, X, confidence)
+            return _finite_uncertainty(reducer(conformal_predictor, X, confidence))
 
         return uncertainty_function
 
@@ -161,7 +178,9 @@ def make_uncertainty_function(
             X,
             confidence=confidence,
         )
-        return reducer_reg(lower, upper)
+        with np.errstate(invalid="ignore", over="ignore"):
+            values = reducer_reg(lower, upper)
+        return _finite_uncertainty(values)
 
     return uncertainty_function
 
