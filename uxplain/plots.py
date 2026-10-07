@@ -139,7 +139,7 @@ def generate_shap_plots(
                      f" — {metric_txt}")
         ax = shap_waterfall(explanation, index=waterfall_index,
                             feature_names=feature_names,
-                            max_display=max_display or 10,
+                            max_display=10 if max_display is None else max_display,
                             figsize=figsize, title=title)
         figures["waterfall"] = ax.figure
 
