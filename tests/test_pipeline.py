@@ -2,6 +2,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
+import shap
 from sklearn.linear_model import Ridge
 
 from uxplain import (
@@ -13,7 +14,6 @@ from uxplain import (
 )
 from uxplain.explainability.pdp_explainer import PDPExplanation, PDPUncertaintyExplainer
 from uxplain.plots import generate_pdp_plots
-import shap
 
 # Avoid blocking plot windows during tests
 matplotlib.use("Agg")
@@ -36,6 +36,10 @@ def _make_pipeline(xai_method="shap", **kwargs):
 # ---------------------------------------------------------------------------
 
 class TestInit:
+    def test_invalid_task_is_rejected(self):
+        with pytest.raises(ValueError, match="Unknown task"):
+            UncertaintyExplanationPipeline(model=Ridge(), task="clasification")
+
     def test_requires_model_or_conformal_predictor(self):
         with pytest.raises(ValueError, match="model.*conformal_predictor"):
             UncertaintyExplanationPipeline()
@@ -48,7 +52,7 @@ class TestInit:
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
         pipeline = UncertaintyExplanationPipeline(conformal_predictor=cp)
         pipeline.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = pipeline.predict(data["X_test"])
+        lower, _ = pipeline.predict(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
 
@@ -81,7 +85,7 @@ class TestFitPredict:
         # When X_calib / y_calib are not given, pipeline auto-splits
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"], calib_size=0.2)
-        lower, upper = pipeline.predict(data["X_test"])
+        lower, _ = pipeline.predict(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
     def test_explicit_calib_split(self, data):
@@ -90,7 +94,7 @@ class TestFitPredict:
             data["X_train"], data["y_train"],
             data["X_calib"], data["y_calib"],
         )
-        lower, upper = pipeline.predict(data["X_test"])
+        lower, _ = pipeline.predict(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
     def test_confidence_override(self, data):
@@ -123,6 +127,50 @@ class TestFitPredict:
         pipeline = _make_pipeline()
         pipeline.fit(X_df, data["y_train"])
         assert pipeline._feature_names == cols
+
+    def test_fit_returns_pipeline(self, data):
+        pipeline = _make_pipeline()
+        assert pipeline.fit(data["X_train"], data["y_train"]) is pipeline
+
+    def test_dataframe_columns_must_match_training_order(self, data):
+        columns = ["a", "b", "c", "d"]
+        pipeline = _make_pipeline()
+        pipeline.fit(pd.DataFrame(data["X_train"], columns=columns), data["y_train"])
+        reordered = pd.DataFrame(data["X_test"], columns=columns)[columns[::-1]]
+        with pytest.raises(ValueError, match="columns.*order"):
+            pipeline.predict(reordered)
+        with pytest.raises(ValueError, match="columns.*order"):
+            pipeline.explain(reordered, show_plots=False)
+
+    def test_refit_with_array_clears_stale_feature_names(self, data):
+        pipeline = _make_pipeline()
+        pipeline.fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
+        pipeline.fit(data["X_train"], data["y_train"])
+        assert pipeline._feature_names is None
+        assert pipeline.explainer.feature_names is None
+
+    @pytest.mark.parametrize("dataframe_first", [False, True])
+    def test_array_fit_preserves_custom_explainer_feature_names(self, data, dataframe_first):
+        from uxplain.explainability.shap_explainer import ShapUncertaintyExplainer
+
+        custom_names = ["first", "second", "third", "fourth"]
+        custom_explainer = ShapUncertaintyExplainer(None, feature_names=custom_names)
+        pipeline = _make_pipeline(explainer=custom_explainer)
+        if dataframe_first:
+            pipeline.fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
+            assert custom_explainer.feature_names == list("abcd")
+        for _ in range(2):
+            pipeline.fit(data["X_train"], data["y_train"])
+            assert custom_explainer.feature_names == custom_names
+            assert pipeline._feature_names is None
+
+    def test_failed_refit_invalidates_pipeline(self, data):
+        pipeline = _make_pipeline()
+        pipeline.fit(data["X_train"], data["y_train"])
+        with pytest.raises(ValueError):
+            pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"])
+        with pytest.raises(RuntimeError, match="not fitted"):
+            pipeline.predict(data["X_test"])
 
 
 # ---------------------------------------------------------------------------

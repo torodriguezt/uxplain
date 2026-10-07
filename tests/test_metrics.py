@@ -37,6 +37,16 @@ def fitted_classifier_cp(classification_data, classifier):
 # ---------------------------------------------------------------------------
 
 class TestMakeUncertaintyFunction:
+    @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
+    def test_unbounded_predictions_cannot_be_explained(self, metric):
+        class UnboundedPredictor:
+            def predict(self, X, confidence=0.9):
+                return np.full(len(X), -np.inf), np.full(len(X), np.inf)
+
+        fn = make_uncertainty_function(UnboundedPredictor(), metric=metric)
+        with pytest.raises(ValueError, match="non-finite uncertainty"):
+            fn(np.zeros((2, 1)))
+
     def test_width_matches_upper_minus_lower(self, fitted_cp, data):
         fn = make_uncertainty_function(fitted_cp, confidence=0.9, metric="width")
         lower, upper = fitted_cp.predict(data["X_test"], confidence=0.9)
@@ -122,6 +132,18 @@ class TestPipelineMetric:
 # ---------------------------------------------------------------------------
 
 class TestClassificationMetrics:
+    def test_confidence_requires_two_classes(self):
+        class SingleClassPredictor:
+            def predict_set(self, X, confidence=0.9):
+                return np.ones((len(X), 1), dtype=bool)
+
+            def predict_p(self, X):
+                return np.ones((len(X), 1))
+
+        fn = make_uncertainty_function(SingleClassPredictor(), metric="confidence")
+        with pytest.raises(ValueError, match="at least two classes"):
+            fn(np.zeros((2, 1)))
+
     def test_set_size_matches_predict_set_sum(
         self, fitted_classifier_cp, classification_data,
     ):

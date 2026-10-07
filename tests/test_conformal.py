@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from sklearn.dummy import DummyRegressor
 from sklearn.linear_model import Ridge
 
 from uxplain import (
@@ -7,6 +8,7 @@ from uxplain import (
     CrepesConformalClassifier,
     CrepesConformalPredictor,
 )
+from uxplain.conformal.crepes_predictor import _DeterministicMondrianCategorizer
 
 
 class TestCrepesConformalPredictor:
@@ -58,6 +60,52 @@ class TestCrepesConformalPredictor:
         width_90 = (upper_90 - lower_90).mean()
         width_95 = (upper_95 - lower_95).mean()
         assert width_95 > width_90
+
+    def test_uncalibrated_mondrian_bin_is_unbounded(self):
+        X_train = np.linspace(0, 1, 100).reshape(-1, 1)
+        X_calib = np.linspace(0.01, 0.04, 20).reshape(-1, 1)
+        cp = CrepesConformalPredictor(Ridge(alpha=0), method="mondrian")
+        cp.fit(X_train, X_train[:, 0], X_calib, X_calib[:, 0])
+        lower, upper = cp.predict(np.array([[0.02], [0.95]]), confidence=0.5)
+        assert np.isfinite(lower[0]) and np.isfinite(upper[0])
+        assert np.isneginf(lower[1]) and np.isposinf(upper[1])
+
+    def test_mondrian_ties_have_deterministic_predictions(self):
+        X_train = np.arange(100).reshape(-1, 1)
+        X_calib = np.arange(100, 300).reshape(-1, 1)
+        cp = CrepesConformalPredictor(DummyRegressor(), method="mondrian")
+        cp.fit(X_train, np.zeros(100), X_calib, np.arange(200))
+        X_test = np.arange(50).reshape(-1, 1)
+        first = cp.predict(X_test)
+        np.testing.assert_array_equal(cp.predict(X_test), first)
+        reversed_prediction = cp.predict(X_test[::-1])
+        np.testing.assert_array_equal(reversed_prediction[0][::-1], first[0])
+        np.testing.assert_array_equal(reversed_prediction[1][::-1], first[1])
+
+    @pytest.mark.parametrize("use_difficulty", [False, True])
+    def test_mondrian_partition_does_not_depend_on_global_seed(self, use_difficulty):
+        class TinyScores:
+            def apply(self, X):
+                return X[:, 0]
+
+        X = np.arange(100).reshape(-1, 1) * 1e-11
+        kwargs = {"de": TinyScores()} if use_difficulty else {"f": lambda X: X[:, 0]}
+        rng_state = np.random.get_state()
+        try:
+            np.random.seed(0)
+            first = _DeterministicMondrianCategorizer().fit(X, **kwargs)
+            np.random.seed(1)
+            second = _DeterministicMondrianCategorizer().fit(X, **kwargs)
+        finally:
+            np.random.set_state(rng_state)
+        np.testing.assert_array_equal(first.bin_thresholds, second.bin_thresholds)
+        np.testing.assert_array_equal(first.apply(X), second.apply(X))
+
+    def test_constant_mondrian_scores_form_one_bin(self):
+        X = np.ones((100, 1))
+        mc = _DeterministicMondrianCategorizer().fit(X, f=lambda X: X[:, 0])
+        np.testing.assert_array_equal(mc.bin_thresholds, [-np.inf, np.inf])
+        np.testing.assert_array_equal(mc.apply(X), np.zeros(100, dtype=int))
 
 
 class TestCQRConformalPredictor:
@@ -125,6 +173,41 @@ class TestCQRConformalPredictor:
                data["X_calib"][:9], data["y_calib"][:9])
         lower, upper = cp.predict(data["X_test"], confidence=0.95)
         assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
+
+    def test_rank_does_not_round_down_above_boundary(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        cp.fit(data["X_train"], data["y_train"],
+               data["X_calib"][:9], data["y_calib"][:9])
+        lower, upper = cp.predict(data["X_test"], confidence=0.9 + 1e-12)
+        assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
+
+    def test_nonfinite_calibration_target_is_rejected(
+        self, data, quantile_lower, quantile_upper,
+    ):
+        cp = CQRConformalPredictor(quantile_lower, quantile_upper)
+        y_calib = data["y_calib"].copy()
+        y_calib[0] = np.nan
+        with pytest.raises(ValueError, match="finite"):
+            cp.fit(data["X_train"], data["y_train"], data["X_calib"], y_calib)
+
+    def test_empty_cqr_set_preserves_signed_endpoints(self):
+        class FixedQuantile:
+            def __init__(self, sign):
+                self.sign = sign
+
+            def fit(self, X, y):
+                pass
+
+            def predict(self, X):
+                return self.sign * X[:, 0]
+
+        cp = CQRConformalPredictor(FixedQuantile(-1), FixedQuantile(1))
+        cp.fit(np.ones((10, 1)), np.zeros(10), np.full((20, 1), 10), np.zeros(20))
+        lower, upper = cp.predict(np.ones((1, 1)))
+        np.testing.assert_array_equal(lower, [9.0])
+        np.testing.assert_array_equal(upper, [-9.0])
 
 
 class TestCrepesConformalClassifier:
@@ -230,3 +313,75 @@ class TestCrepesConformalClassifier:
         p_smooth = cp.predict_p(X)
         assert np.all(p_smooth <= p_plain)
         assert np.any(p_smooth < p_plain)
+
+    def test_unseen_calibration_label_is_rejected(self, classification_data, classifier):
+        cp = CrepesConformalClassifier(classifier)
+        y_calib = classification_data["y_calib"].copy()
+        y_calib[0] = 99
+        with pytest.raises(ValueError, match="classes absent"):
+            cp.fit(classification_data["X_train"], classification_data["y_train"],
+                   classification_data["X_calib"], y_calib)
+
+    def test_absent_calibration_class_has_p_value_one(self, classification_data, classifier):
+        cp = CrepesConformalClassifier(classifier, method="class_cond")
+        keep = classification_data["y_calib"] != 2
+        cp.fit(classification_data["X_train"], classification_data["y_train"],
+               classification_data["X_calib"][keep], classification_data["y_calib"][keep])
+        p = cp.predict_p(classification_data["X_test"])
+        np.testing.assert_array_equal(p[:, np.flatnonzero(cp.classes_ == 2)[0]], 1)
+
+
+class TestBackendValidation:
+    @pytest.mark.parametrize("backend", ["crepes", "cqr"])
+    def test_column_targets_do_not_broadcast(self, backend, data):
+        def make_cp():
+            if backend == "cqr":
+                return CQRConformalPredictor(Ridge(), Ridge())
+            return CrepesConformalPredictor(Ridge(), method="standard")
+
+        flat = make_cp()
+        flat.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        column = make_cp()
+        column.fit(data["X_train"], data["y_train"][:, None],
+                   data["X_calib"], data["y_calib"][:, None])
+        np.testing.assert_allclose(column.predict(data["X_test"]),
+                                   flat.predict(data["X_test"]))
+
+    @pytest.mark.parametrize("backend", ["crepes", "cqr"])
+    def test_multioutput_targets_are_rejected(self, backend, data):
+        cp = (CQRConformalPredictor(Ridge(), Ridge()) if backend == "cqr"
+              else CrepesConformalPredictor(Ridge()))
+        with pytest.raises(ValueError, match="single output"):
+            cp.fit(data["X_train"], np.column_stack([data["y_train"]] * 2),
+                   data["X_calib"], data["y_calib"])
+
+    @pytest.mark.parametrize("backend", ["crepes", "cqr", "classification"])
+    @pytest.mark.parametrize("confidence", [0, 1, -0.1, 90, np.nan, np.inf, "0.9"])
+    def test_invalid_confidence_is_rejected(
+        self, backend, confidence, data, classification_data, classifier,
+    ):
+        if backend == "classification":
+            cp = CrepesConformalClassifier(classifier)
+            fit_data = classification_data
+        else:
+            cp = (CQRConformalPredictor(Ridge(), Ridge()) if backend == "cqr"
+                  else CrepesConformalPredictor(Ridge(), method="standard"))
+            fit_data = data
+        cp.fit(fit_data["X_train"], fit_data["y_train"],
+               fit_data["X_calib"], fit_data["y_calib"])
+        predict = cp.predict_set if backend == "classification" else cp.predict
+        with pytest.raises(ValueError, match="confidence must be in"):
+            predict(fit_data["X_test"], confidence=confidence)
+
+    @pytest.mark.parametrize("cp_class", [CrepesConformalPredictor, CrepesConformalClassifier])
+    def test_unknown_method_is_rejected(self, cp_class):
+        with pytest.raises(ValueError, match="Unknown conformal"):
+            cp_class(Ridge(), method="typo")
+
+    @pytest.mark.parametrize("backend", ["crepes", "cqr"])
+    def test_empty_calibration_is_rejected(self, backend, data):
+        cp = (CQRConformalPredictor(Ridge(), Ridge()) if backend == "cqr"
+              else CrepesConformalPredictor(Ridge()))
+        with pytest.raises(ValueError, match="non-empty"):
+            cp.fit(data["X_train"], data["y_train"],
+                   data["X_calib"][:0], data["y_calib"][:0])
