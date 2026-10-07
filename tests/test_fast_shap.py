@@ -136,6 +136,33 @@ class TestFastPathSingleRow:
 
 
 class TestFastPathGuards:
+    def test_custom_payoff_on_masked_rows_uses_generic_path(self):
+        """Observed-row agreement does not prove affinity of the SHAP game."""
+        class HybridPredictor:
+            model = object()
+
+            def predict(self, X, confidence=0.9):
+                X = np.asarray(X)
+                width = 5 + (X[:, 0] - X[:, 1]) * (1 + 2 * X[:, 0])
+                return np.zeros(len(X)), width
+
+        explainer = ShapUncertaintyExplainer(HybridPredictor())
+        explainer.fit(np.array([[0., 0.]]))
+        explanation = explainer.explain(np.array([[1., 1.]]))
+        # Width equals five on the explained and background rows but changes
+        # on the two masked hybrids. The old constant shortcut returned zeros.
+        assert explainer.used_fast_path is False
+        np.testing.assert_allclose(explanation.values, [[2., -2.]])
+
+    @pytest.mark.parametrize("metric", ["width", "lower", "upper"])
+    def test_normalized_identical_rows_still_rejects_shortcut(self, data, metric):
+        cp = _fit_crepes(data, "normalized")
+        explainer = ShapUncertaintyExplainer(cp, metric=metric)
+        row = data["X_test"][:1]
+        explainer.fit(row)
+        explainer.explain(row)
+        assert explainer.used_fast_path is False
+
     def test_non_tree_model_falls_back(self, data):
         """Ridge is not a tree ensemble, so TreeSHAP cannot be used."""
         cp = CQRConformalPredictor(lower_model=Ridge(), upper_model=Ridge())

@@ -41,6 +41,7 @@ distinction the package is built to expose.
 from __future__ import annotations
 
 import io
+from numbers import Integral
 import os
 from pathlib import Path
 import re
@@ -166,6 +167,16 @@ def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
     :class:`sklearn.utils.Bunch`.
     """
     features = list(features)
+    if not features:
+        raise ValueError("features must contain at least one predictor column.")
+    if target in features:
+        raise ValueError(f"The target column {target!r} cannot also be a feature.")
+    if len(set(features)) != len(features):
+        raise ValueError("features must not contain duplicate columns.")
+    if subsample is not None and (
+        isinstance(subsample, bool) or not isinstance(subsample, Integral) or subsample < 1
+    ):
+        raise ValueError("subsample must be a positive integer or None.")
     missing = [c for c in features + [target] if c not in frame.columns]
     if missing:
         raise KeyError(f"Requested columns not in the data: {missing}")
@@ -179,7 +190,8 @@ def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
         else:
             work[column] = pd.to_numeric(work[column], errors="coerce").astype(float)
 
-    subset = list(dict.fromkeys(features + [target]))  # dedupe if target ∈ feats
+    subset = features + [target]
+    work[subset] = work[subset].replace([float("inf"), float("-inf")], float("nan"))
     work = work.dropna(subset=subset)
     if subsample is not None and subsample < len(work):
         work = work.sample(n=subsample, random_state=random_state)
@@ -272,7 +284,7 @@ def _pnadc_frame(year, quarter, cache_dir, employed_only, min_income):
     frame = frame.rename(columns=PNADC_VARIABLES)
     for column in ("age", "income", "hours", "weight"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame["informal"] = frame["pension_contrib"].str.strip() != _CONTRIBUTES_CODE
+    frame["informal"] = _informality(frame["pension_contrib"])
 
     if employed_only:
         frame = frame[(frame["employed"] == "1")
@@ -330,11 +342,15 @@ def fetch_pnadc(
         table), ``feature_names``, ``target_name``, ``DESCR`` and
         ``citation``; or ``(X, y)`` when ``return_X_y=True``.
     """
+    if isinstance(quarter, bool) or not isinstance(quarter, Integral) or quarter not in (1, 2, 3, 4):
+        raise ValueError("quarter must be an integer from 1 to 4.")
     frame = _pnadc_frame(year, quarter, cache_dir, employed_only, min_income)
+    if features is None:
+        features = [name for name in PNADC_FEATURES if name != target]
     descr = (f"PNAD Continua {year} Q{quarter} (IBGE). "
              f"Target: {target}. {PNADC_CITATION}")
     return _finalize(
-        frame, features or PNADC_FEATURES, target,
+        frame, features, target,
         return_X_y=return_X_y, subsample=subsample, random_state=random_state,
         descr=descr, citation=PNADC_CITATION,
     )
@@ -359,6 +375,12 @@ def _read_geih_module(path: Path) -> pd.DataFrame:
                        encoding="latin-1")
 
 
+def _informality(contribution: pd.Series) -> pd.Series:
+    """Preserve missing contribution codes instead of labelling them informal."""
+    codes = pd.to_numeric(contribution.astype("string").str.strip(), errors="coerce")
+    return codes.ne(int(_CONTRIBUTES_CODE))
+
+
 def _geih_frame(path, variables, min_income):
     """Merge the GEIH modules under ``path`` into one tidy person-level frame."""
     variables = variables or GEIH_VARIABLES
@@ -381,24 +403,27 @@ def _geih_frame(path, variables, min_income):
     else:
         paths = [Path(p) for p in path]
 
+    if not paths:
+        raise ValueError("Pass at least one GEIH CSV file.")
+
     frame = None
     for module in (_read_geih_module(p) for p in paths):
         keep = [c for c in module.columns
                 if c in variables or c in GEIH_MERGE_KEYS]
         module = module[keep]
+        if len(paths) > 1:
+            missing = [key for key in GEIH_MERGE_KEYS if key not in module.columns]
+            if missing:
+                raise KeyError(f"Cannot merge GEIH modules: missing person keys {missing}.")
+            if module[list(GEIH_MERGE_KEYS)].isna().any().any():
+                raise ValueError("Cannot merge GEIH modules with missing person keys.")
         if frame is None:
             frame = module
             continue
-        shared = [k for k in GEIH_MERGE_KEYS
-                  if k in frame.columns and k in module.columns]
-        if not shared:
-            raise KeyError(
-                f"Cannot merge GEIH modules: none of {GEIH_MERGE_KEYS} are "
-                "present in both files. Pass the modules with the person key."
-            )
+        shared = list(GEIH_MERGE_KEYS)
         new_cols = [c for c in module.columns
                     if c not in frame.columns or c in shared]
-        frame = frame.merge(module[new_cols], on=shared, how="inner")
+        frame = frame.merge(module[new_cols], on=shared, how="inner", validate="one_to_one")
 
     present = {src: dst for src, dst in variables.items()
                if src in frame.columns}
@@ -415,10 +440,12 @@ def _geih_frame(path, variables, min_income):
                 frame[column].str.replace(",", ".", regex=False), errors="coerce",
             )
     if "pension_contrib" in frame.columns:
-        frame["informal"] = (frame["pension_contrib"].astype(str).str.strip()
-                             != _CONTRIBUTES_CODE)
+        frame["informal"] = _informality(frame["pension_contrib"])
     if "occupation" in frame.columns:
-        leading = frame["occupation"].astype(str).str.strip().str.zfill(4).str[0]
+        codes = frame["occupation"].astype("string").str.strip()
+        codes = codes.str.replace(r"\.0+$", "", regex=True)
+        codes = codes.where(codes.str.fullmatch(r"\d{1,4}", na=False))
+        leading = codes.str.zfill(4).str[0]
         frame["occupation_group"] = leading.map(CIUO_MAJOR_GROUPS)
 
     frame = frame[frame["income"].fillna(0) >= min_income]
@@ -480,9 +507,11 @@ def load_geih(
         Same shape as :func:`fetch_pnadc`.
     """
     frame = _geih_frame(path, variables, min_income)
+    if features is None:
+        features = [name for name in GEIH_FEATURES if name != target]
     descr = (f"GEIH (DANE), local extract. Target: {target}. {GEIH_CITATION}")
     return _finalize(
-        frame, features or GEIH_FEATURES, target,
+        frame, features, target,
         return_X_y=return_X_y, subsample=subsample, random_state=random_state,
         descr=descr, citation=GEIH_CITATION,
     )

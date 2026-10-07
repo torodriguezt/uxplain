@@ -15,6 +15,39 @@ from uxplain.plots import (
 matplotlib.use("Agg")
 
 
+@pytest.mark.parametrize("kind", ["bar", "beeswarm", "waterfall"])
+def test_single_row_shap_slice_can_be_plotted(kind):
+    import matplotlib.pyplot as plt
+    import shap
+
+    explanation = shap.Explanation(
+        values=np.array([[0.3, -0.2]]), base_values=np.array([1.]),
+        data=np.array([[2., 3.]]), feature_names=["a", "b"],
+    )[0]
+    figures = generate_shap_plots(explanation, kinds=[kind], show=False)
+    assert kind in figures
+    plt.close(figures[kind])
+
+
+def test_waterfall_requires_real_baseline():
+    import shap
+
+    from uxplain.plotting import shap_waterfall
+
+    with pytest.raises(ValueError, match="base_values"):
+        shap_waterfall(shap.Explanation(values=np.array([[0.3, -0.2]])))
+
+
+def test_pdp_interaction_with_constant_feature():
+    import matplotlib.pyplot as plt
+
+    from uxplain.plotting import pdp_interaction
+
+    ax = pdp_interaction(np.array([1.]), np.array([0., 1.]), np.array([[2., 3.]]))
+    assert len(ax.collections) == 1
+    plt.close(ax.figure)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures — fitted pipelines shared across test classes
 # ---------------------------------------------------------------------------

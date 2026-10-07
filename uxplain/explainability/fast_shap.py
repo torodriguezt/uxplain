@@ -40,14 +40,19 @@ crepes standard, ``"lower"``,        the base model (the calibration
 crepes standard, ``"width"``         constant — all attributions are zero
 ===================================  ===================================
 
-``"normalized"`` and Mondrian variants scale the interval by a difficulty
-estimator or bin the calibration set, so the summary stops being affine in a
-tree model and the shortcut does not apply.
+``"normalized"`` scales the interval by a difficulty estimator; only its
+symmetric midpoint remains affine in the base model. Mondrian variants and
+custom predictors use the generic explainer: an empirical residual check
+cannot prove affinity on SHAP's masked inputs. In particular, a masked input
+may fall in an uncalibrated Mondrian bin with an undefined midpoint.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+from ..conformal.cqr_predictor import CQRConformalPredictor
+from ..conformal.crepes_predictor import CrepesConformalPredictor
 
 __all__ = ["describe_fast_path", "tree_shap_values"]
 
@@ -66,11 +71,12 @@ def _components(cp, metric: str):
     ``None`` means this predictor/metric pair has no affine decomposition and
     the caller must fall back to the generic explainer.
     """
-    lower_model = getattr(cp, "lower_model", None)
-    upper_model = getattr(cp, "upper_model", None)
-
     # --- CQR: interval endpoints are two independent quantile models ---
-    if lower_model is not None and upper_model is not None:
+    # Require the built-in implementation, not attributes or subclasses whose
+    # predict() may change the payoff away from the observed data. SHAP also
+    # evaluates hybrid rows formed by mixing X and the background.
+    if type(cp) is CQRConformalPredictor:
+        lower_model, upper_model = cp.lower_model, cp.upper_model
         return {
             "width": [(upper_model, 1.0), (lower_model, -1.0)],
             "midpoint": [(lower_model, 0.5), (upper_model, 0.5)],
@@ -80,14 +86,15 @@ def _components(cp, metric: str):
 
     # --- crepes-style: a single base model with a calibration offset ---
     #
-    # Which metrics stay affine depends on the method: "standard" shifts both
-    # endpoints by the same constant (so all four metrics qualify), whereas
-    # "normalized" scales the offset by a difficulty estimator, leaving only the
-    # midpoint affine — and only when the interval is symmetric. Rather than
-    # enumerate those cases, we propose the decomposition and let the residual
-    # check in :func:`tree_shap_values` reject whatever does not hold.
-    model = getattr(cp, "model", None)
-    if model is None:
+    # Only the standard method has a constant calibration offset. A normalized
+    # or Mondrian width can look constant on all observed rows yet vary on the
+    # hybrid rows used in the Shapley game, so residual checks are not enough.
+    if type(cp) is not CrepesConformalPredictor:
+        return None
+    model = cp.model
+    if cp.method != "standard":
+        if cp.method == "normalized":
+            return [(model, 1.0)] if metric == "midpoint" else None
         return None
     return {
         # width drops the base model entirely; it qualifies only when the
@@ -175,7 +182,7 @@ def tree_shap_values(cp, metric, X, background, target_fn):
     # intervals, cannot be decomposed either.
     check = _check_rows(X, background)
     actual = np.asarray(target_fn(check), dtype=float).ravel()
-    if len(check) < 2 or not np.all(np.isfinite(actual)):
+    if actual.shape != (len(check),) or not np.all(np.isfinite(actual)):
         return None
     linear_part = np.zeros(len(check))
     for expl, weight in explainers:
@@ -184,7 +191,7 @@ def tree_shap_values(cp, metric, X, background, target_fn):
         ).ravel()
     offset = actual - linear_part
     scale = max(np.abs(actual).max(), 1.0)
-    if offset.std() > _LINEARITY_RTOL * scale:
+    if not np.all(np.isfinite(offset)) or np.ptp(offset) > _LINEARITY_RTOL * scale:
         return None
 
     values = np.zeros_like(X)

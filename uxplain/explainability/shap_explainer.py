@@ -4,6 +4,8 @@ SHAP explainer for uncertainty metrics.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import numpy as np
 import shap
 
@@ -13,6 +15,18 @@ from ..uncertainty.metrics import (
     make_uncertainty_function,
 )
 from .fast_shap import tree_shap_values
+
+
+@contextmanager
+def _shap_random_state(rng):
+    """Keep SHAP's legacy global NumPy RNG local to this explainer."""
+    previous = np.random.get_state()
+    np.random.set_state(rng.get_state())
+    try:
+        yield
+    finally:
+        rng.set_state(np.random.get_state())
+        np.random.set_state(previous)
 
 
 class ShapUncertaintyExplainer:
@@ -28,6 +42,7 @@ class ShapUncertaintyExplainer:
         feature_names: list[str] | None = None,
         metric: UncertaintyMetric = "width",
         fast_path: bool = True,
+        random_state: int | None = None,
     ):
         """
         Initialize SHAP explainer.
@@ -53,6 +68,9 @@ class ShapUncertaintyExplainer:
             :mod:`uxplain.explainability.fast_shap`). Falls back to the generic
             explainer whenever the shortcut does not apply. Set to ``False`` to
             always take the generic path, e.g. to compare the two.
+
+        random_state : int, optional
+            Seed for stochastic SHAP algorithms, such as permutation SHAP.
         """
 
         self.cp = cp
@@ -61,6 +79,7 @@ class ShapUncertaintyExplainer:
         self.feature_names = feature_names
         self.metric = metric
         self.fast_path = fast_path
+        self.random_state = random_state
 
         #: True when the last ``explain()`` call used exact TreeSHAP.
         self.used_fast_path: bool | None = None
@@ -68,6 +87,7 @@ class ShapUncertaintyExplainer:
         self._shap_explainer: shap.Explainer | None = None
         self._background: np.ndarray | None = None
         self._target_function = None
+        self._rng = np.random.RandomState(random_state)
 
     def fit(
         self,
@@ -85,11 +105,15 @@ class ShapUncertaintyExplainer:
         )
         self._background = np.asarray(X_background)
 
-        self._shap_explainer = shap.Explainer(
-            self._target_function,
-            X_background,
-            algorithm=algorithm or self.algorithm,
-        )
+        self._rng = np.random.RandomState(self.random_state)
+        with _shap_random_state(self._rng):
+            self._shap_explainer = shap.Explainer(
+                self._target_function,
+                X_background,
+                algorithm=algorithm or self.algorithm,
+                seed=self.random_state,
+            )
+        self.used_fast_path = None
 
     def explain(
         self,
@@ -126,7 +150,8 @@ class ShapUncertaintyExplainer:
         self.used_fast_path = explanation is not None
 
         if explanation is None:
-            explanation = self._shap_explainer(X)
+            with _shap_random_state(self._rng):
+                explanation = self._shap_explainer(X)
 
         if self.feature_names is not None:
             explanation.feature_names = self.feature_names

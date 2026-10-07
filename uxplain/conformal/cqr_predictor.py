@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ._validation import check_confidence, check_fit_data
+
 
 class CQRConformalPredictor:
     """
@@ -40,6 +42,11 @@ class CQRConformalPredictor:
     time still gives valid coverage via the calibration correction, but
     intervals may be wider or narrower than optimal if the mismatch is
     large.
+
+    CQR may return an empty prediction set (``lower > upper``), for example
+    after a negative calibration correction or quantile crossing. Endpoints
+    are preserved, so ``upper - lower`` is a signed span in that case, not
+    the nonnegative length of the empty set.
     """
 
     def __init__(self, lower_model, upper_model):
@@ -67,11 +74,20 @@ class CQRConformalPredictor:
             Calibration data used to compute nonconformity scores.
         """
 
+        self._scores = None
+        self._n_calib = None
+        X_train, y_train, X_calib, y_calib = check_fit_data(
+            X_train, y_train, X_calib, y_calib,
+        )
+        y_calib = np.asarray(y_calib, dtype=float)
+        if not np.all(np.isfinite(y_calib)):
+            raise ValueError("y_calib must contain only finite values.")
+
         self.lower_model.fit(X_train, y_train)
         self.upper_model.fit(X_train, y_train)
 
-        q_low = self.lower_model.predict(X_calib)
-        q_high = self.upper_model.predict(X_calib)
+        q_low = self._predict_quantile(self.lower_model, X_calib)
+        q_high = self._predict_quantile(self.upper_model, X_calib)
 
         # CQR nonconformity score: max(q_low - y, y - q_high)
         self._scores = np.maximum(q_low - y_calib, y_calib - q_high)
@@ -100,20 +116,30 @@ class CQRConformalPredictor:
         if self._scores is None:
             raise RuntimeError("CQRConformalPredictor not fitted. Call fit() first.")
 
+        check_confidence(confidence)
         X = np.asarray(X)
 
         # Conformal quantile (Romano et al., 2019): the ceil((n + 1) * confidence)-th
         # smallest score. When that rank exceeds n, no finite adjustment
-        # guarantees coverage, so the interval is unbounded. The epsilon stops
-        # floating-point noise in the product from bumping the rank up by one.
+        # guarantees coverage, so the interval is unbounded. Do not subtract
+        # a tolerance: that can lower the rank below the requested coverage.
         n = self._n_calib
-        k = max(int(np.ceil((n + 1) * confidence - 1e-9)), 1)
+        k = int(np.ceil((n + 1) * confidence))
         if k > n:
             adjustment = np.inf
         else:
             adjustment = float(np.sort(self._scores)[k - 1])
 
-        lower = self.lower_model.predict(X) - adjustment
-        upper = self.upper_model.predict(X) + adjustment
+        lower = self._predict_quantile(self.lower_model, X) - adjustment
+        upper = self._predict_quantile(self.upper_model, X) + adjustment
 
         return lower, upper
+
+    @staticmethod
+    def _predict_quantile(model, X):
+        values = np.asarray(model.predict(X), dtype=float)
+        if values.shape != (len(X),):
+            raise ValueError("Quantile models must predict one value per sample.")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Quantile model predictions must contain only finite values.")
+        return values

@@ -23,6 +23,7 @@ That makes the primitives composable::
 from __future__ import annotations
 
 from collections.abc import Sequence
+from numbers import Integral
 from typing import Any
 
 from matplotlib.colors import LinearSegmentedColormap, Normalize
@@ -206,9 +207,12 @@ def _finish(ax, style: dict, *, title=None, xlabel=None, ylabel=None,
 
 
 def _resolve_names(explanation, feature_names, n_features) -> list[str]:
-    names = feature_names or getattr(explanation, "feature_names", None)
+    names = (feature_names if feature_names is not None
+             else getattr(explanation, "feature_names", None))
     if names is None:
         return [f"Feature {i}" for i in range(n_features)]
+    if len(names) != n_features:
+        raise ValueError("feature_names must match the number of feature columns.")
     return list(names)
 
 
@@ -219,9 +223,19 @@ def _metric_text(explanation, metric=None) -> str:
 def _unpack_shap(explanation):
     """Extract ``(values, data, base_values)`` from a SHAP explanation."""
     values = np.asarray(explanation.values, dtype=float)
+    if values.ndim == 1:
+        values = values[None, :]
+    if values.ndim != 2 or 0 in values.shape:
+        raise ValueError("SHAP values must have nonempty sample and feature dimensions.")
+    if not np.isfinite(values).all():
+        raise ValueError("SHAP values must be finite to plot contributions.")
     data = getattr(explanation, "data", None)
     if data is not None:
         data = np.asarray(data, dtype=float)
+        if data.ndim == 1:
+            data = data[None, :]
+        if data.shape != values.shape:
+            raise ValueError("Feature data must have the same shape as SHAP values.")
     base = getattr(explanation, "base_values", None)
     if base is not None:
         base = np.asarray(base, dtype=float)
@@ -231,9 +245,19 @@ def _unpack_shap(explanation):
 def _top_features(importance: np.ndarray, max_display: int | None):
     """Return indices of the ``max_display`` most important features, ascending."""
     order = np.argsort(importance)
+    _validate_max_display(max_display)
     if max_display is not None and max_display < len(order):
         order = order[-max_display:]
     return order
+
+
+def _validate_max_display(max_display):
+    if max_display is not None and (
+        isinstance(max_display, bool)
+        or not isinstance(max_display, Integral)
+        or max_display < 1
+    ):
+        raise ValueError("max_display must be a positive integer or None.")
 
 
 def _sign_colors(values, style: dict) -> list[str]:
@@ -300,7 +324,7 @@ def shap_bar(
         ax.bar_label(bars, fmt="%.2f", padding=5,
                      fontsize=style["annotation_size"],
                      color=style["label_color"])
-        ax.set_xlim(0, importance[order].max() * 1.18)
+        ax.set_xlim(0, max(importance[order].max() * 1.18, 1e-9))
 
     _finish(ax, style,
             title=title if title is not None
@@ -364,6 +388,10 @@ def shap_beeswarm(
     values, data, _ = _unpack_shap(explanation)
     if X is not None:
         data = np.asarray(X, dtype=float)
+        if data.ndim == 1:
+            data = data[None, :]
+        if data.shape != values.shape:
+            raise ValueError("X must have the same shape as SHAP values.")
     names = _resolve_names(explanation, feature_names, values.shape[1])
 
     importance = np.abs(values).mean(axis=0)
@@ -439,11 +467,14 @@ def shap_waterfall(
     names = _resolve_names(explanation, feature_names, values.shape[1])
 
     phi = values[index]
-    base_value = 0.0
-    if base is not None:
-        base_value = float(base[index]) if base.ndim else float(base)
+    if base is None:
+        raise ValueError("A SHAP waterfall requires base_values for its additive baseline.")
+    base_value = float(base[index]) if base.ndim else float(base)
+    if not np.isfinite(base_value):
+        raise ValueError("A SHAP waterfall requires a finite baseline.")
     row = data[index] if data is not None else None
 
+    _validate_max_display(max_display)
     order = np.argsort(np.abs(phi))[::-1]
     shown, hidden = order[:max_display], order[max_display:]
 
@@ -655,7 +686,11 @@ def pdp_interaction(
     # partial_dependence returns (len(grid_x), len(grid_y)); transpose for
     # contourf, which expects (n_rows=y, n_cols=x).
     Z = np.asarray(values).T
-    cs = ax.contourf(grid_x, grid_y, Z, levels=levels, cmap=_feature_cmap(style))
+    if len(grid_x) < 2 or len(grid_y) < 2:
+        # A constant feature yields a one-point grid, which contourf rejects.
+        cs = ax.pcolormesh(grid_x, grid_y, Z, shading="nearest", cmap=_feature_cmap(style))
+    else:
+        cs = ax.contourf(grid_x, grid_y, Z, levels=levels, cmap=_feature_cmap(style))
     cbar = fig.colorbar(cs, ax=ax, pad=0.02, fraction=0.045)
     cbar.set_label(metric_name, fontsize=style["label_size"],
                    color=style["label_color"])
