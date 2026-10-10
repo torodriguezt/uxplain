@@ -1,7 +1,7 @@
 """
 Conformalized Quantile Regression predictor.
 
-Implements CQR (Romano, Sesia & Candès, 2019).
+Implements CQR (Romano, Patterson & Candès, 2019).
 """
 
 from __future__ import annotations
