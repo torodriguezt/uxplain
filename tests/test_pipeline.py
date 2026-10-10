@@ -460,7 +460,7 @@ class TestClassificationPipeline:
             classification_data["n_classes"],
         )
 
-    def test_classification_auto_calib_stratified(
+    def test_classification_auto_calib_split(
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
@@ -472,6 +472,31 @@ class TestClassificationPipeline:
         )
         pred_set = pipeline.predict(classification_data["X_test"])
         assert pred_set.shape[0] == len(classification_data["X_test"])
+
+    @pytest.mark.parametrize("split_seed", [None, 17])
+    def test_auto_split_is_independent_of_labels_and_features(
+        self, classifier, monkeypatch, split_seed,
+    ):
+        pipeline = UncertaintyExplanationPipeline(model=classifier, random_state=0)
+        splits = []
+        monkeypatch.setattr(pipeline.cp, "fit", lambda *arrays: splits.append(arrays))
+        X = np.arange(60).reshape(30, 2)
+        labels = [np.arange(30) % 2, np.r_[np.zeros(29), 1]]
+        for y in labels:
+            pipeline.fit(X, y, random_state=split_seed)
+        pipeline.fit(X + 1000, labels[-1], random_state=split_seed)
+
+        for position in (0, 2):  # Training and calibration memberships.
+            np.testing.assert_array_equal(splits[0][position], splits[1][position])
+            np.testing.assert_array_equal(
+                splits[0][position], splits[2][position] - 1000,
+            )
+        train_ids, calib_ids = splits[0][0][:, 0] // 2, splits[0][2][:, 0] // 2
+        assert not set(train_ids) & set(calib_ids)
+        assert set(train_ids) | set(calib_ids) == set(range(30))
+        for y, split in zip(labels, splits):
+            np.testing.assert_array_equal(split[1], y[train_ids])
+            np.testing.assert_array_equal(split[3], y[calib_ids])
 
     def test_classification_pdp_explanation_values_type(
         self, classification_data, classifier,

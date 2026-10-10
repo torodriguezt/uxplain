@@ -208,6 +208,12 @@ class TestCQRConformalPredictor:
         lower, upper = cp.predict(np.ones((1, 1)))
         np.testing.assert_array_equal(lower, [9.0])
         np.testing.assert_array_equal(upper, [-9.0])
+        from uxplain.uncertainty.metrics import make_uncertainty_function
+
+        for metric, expected in (("width", -18), ("midpoint", 0),
+                                 ("lower", 9), ("upper", -9)):
+            target = make_uncertainty_function(cp, metric=metric)
+            np.testing.assert_array_equal(target(np.ones((1, 1))), [expected])
 
 
 class TestCrepesConformalClassifier:
@@ -299,6 +305,22 @@ class TestCrepesConformalClassifier:
         p = cp.predict_p(X)
         np.testing.assert_array_equal(cp.predict_p(X), p)
         np.testing.assert_array_equal(cp.predict_p(X[::-1])[::-1], p)
+        np.testing.assert_array_equal(
+            np.vstack([cp.predict_p(row[None, :]) for row in X[:3]]), p[:3],
+        )
+
+    def test_seeded_smoothing_is_not_a_rowwise_function(
+        self, classification_data, classifier,
+    ):
+        cp = CrepesConformalClassifier(classifier, smoothing=True, random_state=42)
+        cp.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        repeated = np.repeat(classification_data["X_test"][:1], 2, axis=0)
+        p = cp.predict_p(repeated)
+        np.testing.assert_array_equal(p, cp.predict_p(repeated))
+        assert np.any(p[0] != p[1])  # Same x, different batch positions.
 
     def test_smoothing_is_opt_in(self, classification_data, classifier):
         """Smoothed p-values never exceed the conservative non-smoothed ones."""

@@ -132,6 +132,22 @@ class TestPipelineMetric:
 # ---------------------------------------------------------------------------
 
 class TestClassificationMetrics:
+    @pytest.mark.parametrize("metric", ["set_size", "credibility", "confidence"])
+    @pytest.mark.parametrize("seed", [None, 42])
+    def test_smoothed_targets_are_rejected(self, fitted_classifier_cp, metric, seed):
+        fitted_classifier_cp.smoothing = True
+        fitted_classifier_cp.random_state = seed
+        with pytest.raises(ValueError, match="require smoothing=False"):
+            make_uncertainty_function(fitted_classifier_cp, metric=metric)
+
+    def test_enabling_smoothing_after_factory_is_rejected(
+        self, fitted_classifier_cp, classification_data,
+    ):
+        fn = make_uncertainty_function(fitted_classifier_cp, metric="credibility")
+        fitted_classifier_cp.smoothing = True
+        with pytest.raises(ValueError, match="require smoothing=False"):
+            fn(classification_data["X_test"][:2])
+
     def test_confidence_requires_two_classes(self):
         class SingleClassPredictor:
             def predict_set(self, X, confidence=0.9):
@@ -224,6 +240,23 @@ class TestClassificationMetrics:
 
 
 class TestClassificationPipelineMetric:
+    @pytest.mark.parametrize("method", ["shap", "pdp", "lime"])
+    def test_smoothed_predictor_can_predict_but_cannot_be_explained(
+        self, classification_data, classifier, method,
+    ):
+        cp = CrepesConformalClassifier(classifier, smoothing=True, random_state=42)
+        pipeline = UncertaintyExplanationPipeline(
+            conformal_predictor=cp, xai_method=method,
+        )
+        pipeline.fit(
+            classification_data["X_train"], classification_data["y_train"],
+            classification_data["X_calib"], classification_data["y_calib"],
+        )
+        X = classification_data["X_test"][:2]
+        assert pipeline.predict(X).shape == (2, classification_data["n_classes"])
+        with pytest.raises(ValueError, match="require smoothing=False"):
+            pipeline.explain(X, show_plots=False)
+
     @pytest.mark.parametrize(
         "metric", ["set_size", "credibility", "confidence"],
     )

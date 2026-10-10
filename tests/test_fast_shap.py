@@ -44,6 +44,42 @@ def _explain(cp, data, metric, fast_path, n_rows=20):
 
 
 class TestCQRFastPath:
+    def test_negative_signed_width_agrees_with_generic_and_is_additive(self):
+        # Wide training responses at x=(1, 1), narrow ones at x=(0, 0).
+        # Calibrating on central responses at (1, 1) shrinks the endpoints
+        # enough to produce empty sets elsewhere, without clipping their span.
+        X_train = np.repeat([[0., 0.], [1., 1.]], 40, axis=0)
+        y_train = np.r_[np.tile([-1., 1.], 20), np.tile([-10., 10.], 20)]
+        cp = CQRConformalPredictor(*[
+            GradientBoostingRegressor(
+                loss="quantile", alpha=alpha, n_estimators=30,
+                max_depth=1, random_state=0,
+            )
+            for alpha in (0.1, 0.9)
+        ])
+        cp.fit(X_train, y_train, np.ones((20, 2)), np.zeros(20))
+        X = np.array([[0., 0.], [0., 1.], [1., 0.], [1., 1.]])
+        lower, upper = cp.predict(X)
+        signed_width = upper - lower
+        assert np.any(signed_width < 0)
+
+        explanations = []
+        for fast_path in (True, False):
+            explainer = ShapUncertaintyExplainer(
+                cp, metric="width", fast_path=fast_path, random_state=0,
+            )
+            explainer.fit(X)
+            explanation = explainer.explain(X)
+            assert explainer.used_fast_path is fast_path
+            np.testing.assert_allclose(
+                explanation.base_values + explanation.values.sum(axis=1),
+                signed_width, atol=1e-5,
+            )
+            explanations.append(explanation)
+        np.testing.assert_allclose(
+            explanations[0].values, explanations[1].values, atol=1e-5,
+        )
+
     @pytest.mark.parametrize("metric", REGRESSION_METRICS)
     def test_fast_path_is_taken(self, data, metric):
         cp = _fit_cqr(data)

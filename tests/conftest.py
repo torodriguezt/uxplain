@@ -55,10 +55,10 @@ def classification_data():
         random_state=0,
     )
     X_tr, X_te, y_tr, y_te = train_test_split(
-        X, y, test_size=0.25, random_state=0, stratify=y,
+        X, y, test_size=0.25, random_state=0,
     )
     X_tr, X_cal, y_tr, y_cal = train_test_split(
-        X_tr, y_tr, test_size=0.25, random_state=0, stratify=y_tr,
+        X_tr, y_tr, test_size=0.25, random_state=0,
     )
     return {
         "X_train": X_tr,
