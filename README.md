@@ -1,12 +1,13 @@
 # uxplain
 
+[![PyPI version](https://img.shields.io/pypi/v/uxplain.svg)](https://pypi.org/project/uxplain/)
+[![Python >=3.10](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://github.com/torodriguezt/uxplain/blob/main/pyproject.toml)
+[![CI](https://github.com/torodriguezt/uxplain/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/torodriguezt/uxplain/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/torodriguezt/uxplain/blob/main/LICENSE)
+
 `uxplain` explains which features make a model more or less uncertain. It wraps
 scikit-learn compatible models with conformal prediction and uses SHAP, PDP/ICE
 or LIME to explain summaries of their prediction intervals or sets.
-
-The package supports **regression**, through crepes and conformalized quantile
-regression (CQR), and **classification**, through crepes. A single pipeline handles
-model fitting, calibration and explanation.
 
 ## Installation
 
@@ -51,6 +52,8 @@ Use a classifier and `set_size` to explain how many labels enter the prediction 
 ```python
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from uxplain import UncertaintyExplanationPipeline
 
 X, y = load_iris(return_X_y=True)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
