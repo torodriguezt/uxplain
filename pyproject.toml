@@ -7,8 +7,8 @@ name = "uxplain"
 dynamic = ["version"]
 description = "Explainability for conformal prediction uncertainty — regression and classification."
 authors = [
-  { name = "Veronica Seguro Varela" },
   { name = "Tomas Rodriguez Taborda" },
+  { name = "Veronica Seguro Varela" },
   { name = "Rafael Izbicki" },
   { name = "Johnatan Cardona Jimenez" },
 ]

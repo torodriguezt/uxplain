@@ -39,11 +39,19 @@ class CrepesConformalClassifier:
         Seed for the tie-breaking draws of smoothed p-values. Ignored when
         ``smoothing=False``.
     smoothing : bool, default=False
-        Use smoothed p-values. They give exact coverage, but every row gets a
-        fresh uniform tie-breaker on each call, so the same input can come back
-        with a different set size or credibility, and the explainers attribute
-        that noise to features. Non-smoothed p-values are deterministic and
-        conservative (coverage at least the nominal level).
+        Use randomized tie-breaking for prediction. Even with a fixed seed,
+        smoothed p-values can depend on row order and batch size, so built-in
+        explainers require ``smoothing=False``. Non-smoothed p-values are
+        deterministic for a fixed deterministic model and conservative under
+        the conformal assumptions; smoothing does not repair invalid sampling.
+
+    Notes
+    -----
+    Coverage requires calibration and future scores to be exchangeable after
+    training, within the selected groups for conditional methods. The fitted
+    model's classes must contain the full target label space. Unknown calibration
+    labels raise an error; future labels absent from ``classes_`` cannot be
+    covered. Do not select a split or tune the model on calibration outcomes.
 
     Examples
     --------

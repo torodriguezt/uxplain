@@ -18,6 +18,15 @@ interface: each loader returns a :class:`sklearn.utils.Bunch` (with ``data``,
   :func:`load_geih` reads a copy the user has downloaded from DANE; see the note
   on data terms below.
 
+Validation scope
+----------------
+The current release candidate's loader checks use synthetic local extracts.
+The loaders have not been revalidated against real PNAD Continua or GEIH
+microdata after the latest parsing and target-leakage fixes. Before scientific
+use, verify the period's dictionary, row counts, joins, missing values and target
+coding against the producer's files. These helpers do not establish survey
+design validity or exchangeability for conformal coverage.
+
 Data terms and provenance
 -------------------------
 No survey data is bundled with or redistributed by this package; the loaders

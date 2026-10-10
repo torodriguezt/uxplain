@@ -15,6 +15,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - Runnable getting-started examples and release-validation instructions.
 
 ### Fixed
+- Use label-independent automatic calibration splits for classification, matching
+  the usual split-conformal exchangeability argument; no class-based retries.
+- Reject smoothed classification targets in explainers, including with fixed
+  seeds, while retaining smoothed prediction as an opt-in.
 - Validate conformal methods, task names, coverage levels and calibration arrays;
   accept single-column targets without broadcasting CQR calibration scores.
 - Return unbounded regression intervals for Mondrian groups absent from calibration.
@@ -31,6 +35,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   require an explicit baseline for SHAP waterfall plots.
 
 ### Changed
+- Document coverage assumptions, signed CQR spans and pending real-microdata
+  revalidation of dataset loaders; label width plots as signed spans.
 - Use SPDX license metadata and include tests in the source distribution.
 - The manuscript's replication results must be regenerated with this version
   before submission; this entry describes a local release candidate.

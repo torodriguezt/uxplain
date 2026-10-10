@@ -30,6 +30,7 @@ from typing import Literal
 import numpy as np
 
 from ..conformal._validation import check_confidence
+from ..conformal.crepes_classifier import CrepesConformalClassifier
 
 RegressionMetric = Literal["width", "lower", "upper", "midpoint"]
 ClassificationMetric = Literal["set_size", "credibility", "confidence"]
@@ -40,7 +41,7 @@ UncertaintyMetric = Literal[
 
 
 METRIC_LABELS: dict[str, str] = {
-    "width": "Interval width",
+    "width": "Interval width (signed span)",
     "lower": "Lower bound",
     "upper": "Upper bound",
     "midpoint": "Interval midpoint",
@@ -95,6 +96,15 @@ def _finite_uncertainty(values):
     return values
 
 
+def _check_deterministic_classifier(cp):
+    if isinstance(cp, CrepesConformalClassifier) and cp.smoothing:
+        raise ValueError(
+            "Classification explanations require smoothing=False. Smoothed "
+            "p-values depend on random draws and batch layout even with a fixed "
+            "seed. Use smoothing=True only for prediction."
+        )
+
+
 def is_classifier_predictor(cp) -> bool:
     """Return True if ``cp`` exposes the conformal-classifier interface."""
 
@@ -131,6 +141,9 @@ def make_uncertainty_function(
 
     Dispatches between regression and classification reducers based on
     the conformal predictor's interface (presence of ``predict_set``).
+    Explanation targets must be deterministic functions of each row, independent
+    of batch layout. Built-in classifiers with smoothing enabled are rejected;
+    custom predictors must satisfy this contract themselves.
 
     Parameters
     ----------
@@ -159,8 +172,10 @@ def make_uncertainty_function(
                 f"Choose from {list(_CLASSIFICATION_REDUCERS)}."
             )
         reducer = _CLASSIFICATION_REDUCERS[metric]
+        _check_deterministic_classifier(conformal_predictor)
 
         def uncertainty_function(X: np.ndarray) -> np.ndarray:
+            _check_deterministic_classifier(conformal_predictor)
             return _finite_uncertainty(reducer(conformal_predictor, X, confidence))
 
         return uncertainty_function

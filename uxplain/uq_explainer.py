@@ -61,7 +61,7 @@ class ExplanationResult:
     upper : np.ndarray
         Upper prediction bounds.
     interval_width : np.ndarray
-        Width of each prediction interval.
+        Signed endpoint span, ``upper - lower``. Negative for empty CQR sets.
     explanation_values : Any
         Explanation object (e.g. shap.Explanation, lime output).
     """
@@ -358,7 +358,9 @@ class UncertaintyExplanationPipeline:
         Fit conformal predictor.
 
         If X_calib and y_calib are not provided, they are
-        split automatically from X_train using calib_size.
+        split automatically from X_train using calib_size, independently of
+        features and labels (no stratification). Calibration and future test
+        scores must be exchangeable for the selected conformal guarantee.
 
         Parameters
         ----------
@@ -404,15 +406,13 @@ class UncertaintyExplanationPipeline:
                 "calibration set off X_train automatically."
             )
 
-        # Auto-split if calibration set not provided.
-        # Stratify on y for classification to avoid missing classes in calib.
+        # Label-independent splitting preserves the usual split-conformal
+        # exchangeability argument. Do not retry based on observed class counts.
         if X_calib is None:
             seed = random_state if random_state is not None else self.random_state
-            stratify = y_train if self.task == "classification" else None
             X_train, X_calib, y_train, y_calib = train_test_split(
                 X_train, y_train, test_size=calib_size,
                 random_state=seed,
-                stratify=stratify,
             )
 
         # Strip feature names before fitting. SHAP/LIME later call predict()

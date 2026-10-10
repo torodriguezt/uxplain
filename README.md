@@ -1,31 +1,29 @@
 # uxplain
 
-Explainability for conformal prediction uncertainty.
+`uxplain` explains which features make a model more or less uncertain. It wraps
+scikit-learn compatible models with conformal prediction and uses SHAP, PDP/ICE
+or LIME to explain summaries of their prediction intervals or sets.
 
-`uxplain` fits a split-conformal predictor on any scikit-learn estimator, reduces its output to a
-scalar uncertainty summary *u(x)*, and attributes *u(x)* to the input features with SHAP, PDP/ICE
-or LIME. The result tells you which features make the model more or less uncertain, not just
-which ones drive its predictions.
+The package supports **regression**, through crepes and conformalized quantile
+regression (CQR), and **classification**, through crepes. A single pipeline handles
+model fitting, calibration and explanation.
 
-- **Conformal backends:** [crepes](https://github.com/henrikbostrom/crepes) (standard,
-  normalized, Mondrian) and conformalized quantile regression (CQR) for regression; crepes
-  (standard, class-conditional, Mondrian) for classification.
-- **Summaries *u(x)*:** interval `width`, `lower`, `upper` and `midpoint` for regression;
-  `set_size`, `credibility` and `confidence` for classification.
-- **Explainers:** SHAP, with an exact TreeSHAP shortcut when *u* is affine in tree-ensemble
-  components (e.g. CQR width); PDP/ICE, including 2D interactions; LIME.
+## Installation
 
-## Install
+Requires Python 3.10 or later.
 
 ```bash
-pip install uxplain     # Python >= 3.10
+pip install uxplain
 ```
 
-## Use
+## Regression
+
+Explain prediction interval width with SHAP. `fit()` automatically reserves a
+separate calibration sample.
 
 ```python
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.datasets import make_regression
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from uxplain import UncertaintyExplanationPipeline
 
@@ -34,48 +32,60 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
 pipe = UncertaintyExplanationPipeline(
     model=RandomForestRegressor(n_estimators=50, random_state=42),
-    confidence=0.9,              # nominal coverage
-    xai_method="shap",           # "shap" | "pdp" | "lime"
-    uncertainty_metric="width",  # the summary u(x) to explain
+    confidence=0.9,
+    xai_method="shap",
+    uncertainty_metric="width",
     random_state=42,
 )
-pipe.fit(X_train, y_train)       # holds out a calibration split unless you pass one
+pipe.fit(X_train, y_train)
 result = pipe.explain(X_test[:5], show_plots=False)
 
-result.lower, result.upper       # conformal intervals
-result.explanation_values        # attributions of u(x)
+print(result.interval_width)
+print(result.explanation_values)
 ```
 
-Pass a classifier and the task switches to prediction sets (`result.prediction_set`,
-`result.p_values`, `result.set_size`). Worked examples are in
-[`notebooks/`](https://github.com/torodriguezt/uxplain/tree/main/notebooks),
-and the [getting-started guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md)
-covers calibration, classification and development.
+## Classification
 
-The explanations describe a scalar summary of the fitted conformal predictor.
-They do not estimate causal effects or give a coverage guarantee for the
-explanation itself. Coverage claims depend on the conformal method's assumptions,
-including an appropriate held-out calibration sample.
+Use a classifier and `set_size` to explain how many labels enter the prediction set.
 
-## Development and release checks
+```python
+from sklearn.datasets import load_iris
+from sklearn.ensemble import RandomForestClassifier
 
-```bash
-python -m pip install -e ".[dev,release]"
-python -m ruff check .
-python -m pytest
-python -m build
-python -m twine check --strict dist/*
+X, y = load_iris(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+
+pipe = UncertaintyExplanationPipeline(
+    model=RandomForestClassifier(n_estimators=50, random_state=42),
+    uncertainty_metric="set_size",
+    random_state=42,
+)
+pipe.fit(X_train, y_train)
+result = pipe.explain(X_test[:5], show_plots=False)
+
+print(result.prediction_set)
+print(result.explanation_values)
 ```
 
-See the [release guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#releasing)
-for installation checks and the publication checklist. Building and testing these
-archives does not publish them to PyPI.
+## Learn more
+
+The [getting-started guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md)
+covers calibration, other uncertainty summaries and explainer options. See the
+[notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks) for more examples
+and the [release guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#releasing)
+for development and publishing.
+
+Coverage guarantees depend on the conformal method's
+[statistical assumptions](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#statistical-scope-and-limitations);
+they do not extend to the explanations themselves.
 
 ## Authors
 
-- **Veronica Seguro Varela** — Universidad Nacional de Colombia, Medellín
 - **Tomas Rodriguez Taborda** — Universidad Nacional de Colombia, Medellín
+- **Veronica Seguro Varela** — Universidad Nacional de Colombia, Medellín
 - **Rafael Izbicki** — Federal University of São Carlos
 - **Johnatan Cardona Jimenez** — Universidad Nacional de Colombia, Medellín
 
-MIT License.
+## License
+
+[MIT](https://github.com/torodriguezt/uxplain/blob/main/LICENSE).
