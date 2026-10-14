@@ -10,6 +10,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - PNAD Continua and GEIH dataset loaders, without bundling survey microdata.
 - Exact TreeSHAP for supported affine summaries of built-in conformal predictors,
   with generic SHAP as the fallback.
+- `UncertaintyExplanationPipeline.evaluate()` reports empirical coverage and the
+  size of conformal outputs on labelled data, overall and per group;
+  `classes_`, `used_fast_path` and `algorithm_used` expose fitted state without
+  reaching into internal objects.
+- `importance()` on explanation results, and the underlying `coverage_table()`
+  and `importance_table()`, with bootstrap intervals for importances and ranks;
+  `importance_bar()` plots such tables with their intervals.
+- `CQRConformalPredictor(rearrange=True)` sorts the two quantile predictions so
+  that estimated quantiles never cross.
+- `ShapUncertaintyExplainer(background_size=...)` controls the background rows
+  that define the Shapley game.
+- Dataset loaders return household identifiers (`groups`), file provenance with
+  SHA-256 digests, and accept `one_per_household=True`; `fetch_pnadc` pins a
+  release with `archive` and `sha256`, and offers `occupation_group` as a target.
 - Python 3.13 CI coverage and Linux/Windows distribution checks that install the
   wheel and run the tests included in the source archive outside the checkout.
 - Runnable getting-started examples and release-validation instructions.
@@ -35,6 +49,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   require an explicit baseline for SHAP waterfall plots.
 
 ### Changed
+- Both SHAP paths receive the same explicitly subsampled background (100 rows by
+  default, as before); TreeSHAP no longer applies SHAP's own 100-row cap on top,
+  so larger backgrounds define the same game in both paths.
+- Survey codes become indicators before modelling: `female`, `black_or_brown`
+  (IBGE's *preta ou parda*), `urban` and `informal` (missing when the
+  contribution status is unknown or, in GEIH, the worker is already pensioned).
+  Out-of-range education codes are missing, and PNAD `hours` are usual weekly
+  hours (`VD4031`) instead of hours worked in the reference week.
+- Bar and waterfall labels choose their decimals from the magnitude of the values.
 - Document coverage assumptions, signed CQR spans and pending real-microdata
   revalidation of dataset loaders; label width plots as signed spans.
 - Use SPDX license metadata and include tests in the source distribution.
