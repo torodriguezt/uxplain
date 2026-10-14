@@ -7,11 +7,12 @@ Implements CQR (Romano, Patterson & Candès, 2019).
 from __future__ import annotations
 
 import numpy as np
+from sklearn.base import BaseEstimator
 
 from ._validation import check_confidence, check_fit_data
 
 
-class CQRConformalPredictor:
+class CQRConformalPredictor(BaseEstimator):
     """
     Conformalized Quantile Regression (CQR) predictor.
 
@@ -34,6 +35,15 @@ class CQRConformalPredictor:
 
             GradientBoostingRegressor(loss="quantile", alpha=0.95)
 
+    rearrange : bool, default=False
+        Sort the two quantile predictions before calibrating and predicting
+        (the rearrangement of Chernozhukov, Fernández-Val and Galichon, 2010),
+        so that estimated quantiles never cross. The rearranged quantiles are
+        still functions fitted on the training data only, so the conformal
+        guarantee is unchanged. A negative calibration correction can still
+        produce empty sets. Only the midpoint then stays affine in the two
+        quantile models.
+
     Notes
     -----
     The quantile levels baked into the models should match the
@@ -49,9 +59,10 @@ class CQRConformalPredictor:
     the nonnegative length of the empty set.
     """
 
-    def __init__(self, lower_model, upper_model):
+    def __init__(self, lower_model, upper_model, rearrange: bool = False):
         self.lower_model = lower_model
         self.upper_model = upper_model
+        self.rearrange = rearrange
 
         self._scores: np.ndarray | None = None
         self._n_calib: int | None = None
@@ -62,7 +73,7 @@ class CQRConformalPredictor:
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> None:
+    ):
         """
         Fit quantile models and calibrate nonconformity scores.
 
@@ -86,12 +97,12 @@ class CQRConformalPredictor:
         self.lower_model.fit(X_train, y_train)
         self.upper_model.fit(X_train, y_train)
 
-        q_low = self._predict_quantile(self.lower_model, X_calib)
-        q_high = self._predict_quantile(self.upper_model, X_calib)
+        q_low, q_high = self._quantiles(X_calib)
 
         # CQR nonconformity score: max(q_low - y, y - q_high)
         self._scores = np.maximum(q_low - y_calib, y_calib - q_high)
         self._n_calib = len(y_calib)
+        return self
 
     def predict(
         self,
@@ -130,10 +141,15 @@ class CQRConformalPredictor:
         else:
             adjustment = float(np.sort(self._scores)[k - 1])
 
-        lower = self._predict_quantile(self.lower_model, X) - adjustment
-        upper = self._predict_quantile(self.upper_model, X) + adjustment
+        q_low, q_high = self._quantiles(X)
+        return q_low - adjustment, q_high + adjustment
 
-        return lower, upper
+    def _quantiles(self, X):
+        q_low = self._predict_quantile(self.lower_model, X)
+        q_high = self._predict_quantile(self.upper_model, X)
+        if self.rearrange:
+            q_low, q_high = np.minimum(q_low, q_high), np.maximum(q_low, q_high)
+        return q_low, q_high
 
     @staticmethod
     def _predict_quantile(model, X):
