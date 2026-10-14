@@ -175,5 +175,5 @@ The MAPIE test is skipped if MAPIE is missing. For your own backend, also check
 output shapes, class-column alignment, cloning, supported coverage levels and
 row-wise determinism, including predictions on a row alone and within different
 batches. Use held-out data for empirical evaluation and preserve the
-[statistical assumptions](getting-started.md#statistical-scope-and-limitations)
+[calibration assumptions](getting-started.md#calibration)
 when creating training and calibration samples.
