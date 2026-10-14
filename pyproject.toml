@@ -66,7 +66,11 @@ release = [
     "build>=1.2",
     "twine>=6.1",
 ]
-docs = ["mkdocs>=1.6"]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5,<10",
+    "mkdocstrings[python]>=1.0,<2",
+]
 
 [tool.flit.sdist]
 include = ["LICENSE", "README.md", "CHANGELOG.md", "pyproject.toml", "tests/"]
