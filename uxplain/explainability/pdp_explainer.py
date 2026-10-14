@@ -5,13 +5,16 @@ PDP explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
+import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.inspection import partial_dependence
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
+from .base import UncertaintyExplanation
 
 
 class _FunctionEstimator(RegressorMixin, BaseEstimator):
@@ -28,8 +31,8 @@ class _FunctionEstimator(RegressorMixin, BaseEstimator):
         return self.func(X)
 
 
-@dataclass
-class PDPExplanation:
+@dataclass(repr=False)
+class PDPExplanation(UncertaintyExplanation):
     """
     Result of ``PDPUncertaintyExplainer.explain()``.
 
@@ -75,8 +78,39 @@ class PDPExplanation:
     grid_values_2d: list[tuple[np.ndarray, np.ndarray]] | None = field(default=None)
     metric: str = field(default="width")
 
+    method: ClassVar[str] = "pdp"
 
-class PDPUncertaintyExplainer:
+    def _name(self, feature) -> str:
+        if self.feature_names is not None and not isinstance(feature, str):
+            return str(self.feature_names[feature])
+        return str(feature)
+
+    def to_frame(self) -> pd.DataFrame:
+        """Long table of the averaged curves: ``feature``, ``grid_value``, ``average``."""
+        rows = [
+            {"feature": self._name(feature), "grid_value": float(g), "average": float(v)}
+            for feature, grid, curve in zip(self.features, self.grid_values, self.values)
+            for g, v in zip(grid, curve)
+        ]
+        return pd.DataFrame(rows, columns=["feature", "grid_value", "average"])
+
+    def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
+        """Partial-dependence figures: ``"pdp"``, ``"ice"``, ``"pdp_ice"``,
+        ``"pdp_2d"`` and ``"importance"``.
+
+        Keyword arguments are passed to :func:`uxplain.plots.generate_pdp_plots`.
+        """
+        from ..plots import generate_pdp_plots
+
+        kinds = [kind] if isinstance(kind, str) else kind
+        return generate_pdp_plots(self, kinds=kinds, show=show, **kwargs)
+
+    def _describe(self) -> str:
+        names = [self._name(feature) for feature in self.features]
+        return f"kind={self.kind!r}, features={names}"
+
+
+class PDPUncertaintyExplainer(BaseEstimator):
     """
     PDP-based explainer for uncertainty metrics.
 

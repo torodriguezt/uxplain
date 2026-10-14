@@ -25,7 +25,9 @@ of Shapley values in the payoff function, gives
 So the attributions can be obtained by running exact TreeSHAP on each component
 model and combining the results, which is orders of magnitude cheaper than
 KernelSHAP over the composed function. The constant :math:`c` (the calibration
-offset) shifts only the base value, never the attributions.
+offset) shifts only the base value, never the attributions. The identity holds
+because every component uses the same interventional game: the same background
+rows that the generic explainer receives.
 
 Eligible combinations:
 
@@ -35,6 +37,7 @@ Predictor / metric                   Decomposition
 CQR, ``"width"``                     ``upper_model - lower_model``
 CQR, ``"midpoint"``                  ``(lower_model + upper_model) / 2``
 CQR, ``"lower"`` / ``"upper"``       the corresponding quantile model
+rearranged CQR, ``"midpoint"``       ``(lower_model + upper_model) / 2``
 crepes standard, ``"lower"``,        the base model (the calibration
 ``"upper"``, ``"midpoint"``          offset is constant)
 crepes standard, ``"width"``         constant — all attributions are zero
@@ -77,6 +80,11 @@ def _components(cp, metric: str):
     # evaluates hybrid rows formed by mixing X and the background.
     if type(cp) is CQRConformalPredictor:
         lower_model, upper_model = cp.lower_model, cp.upper_model
+        if getattr(cp, "rearrange", False):
+            # min/max of the two models: only their average stays affine.
+            if metric == "midpoint":
+                return [(lower_model, 0.5), (upper_model, 0.5)]
+            return None
         return {
             "width": [(upper_model, 1.0), (lower_model, -1.0)],
             "midpoint": [(lower_model, 0.5), (upper_model, 0.5)],
@@ -111,9 +119,11 @@ def _tree_explainer(model, background):
     import shap
 
     try:
+        # A plain array would be wrapped in a masker that keeps at most 100
+        # rows; an explicit masker keeps exactly the rows the generic path uses.
         return shap.TreeExplainer(
             model,
-            data=background,
+            data=shap.maskers.Independent(background, max_samples=len(background)),
             feature_perturbation="interventional",
         )
     except Exception:  # noqa: BLE001 - any failure here just means "not a tree ensemble"

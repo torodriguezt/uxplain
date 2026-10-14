@@ -5,15 +5,18 @@ SHAP explainer for uncertainty metrics.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from numbers import Integral
 
 import numpy as np
 import shap
+from sklearn.base import BaseEstimator
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import (
     UncertaintyMetric,
     make_uncertainty_function,
 )
+from .base import ShapExplanation
 from .fast_shap import tree_shap_values
 
 
@@ -29,9 +32,15 @@ def _shap_random_state(rng):
         np.random.set_state(previous)
 
 
-class ShapUncertaintyExplainer:
+class ShapUncertaintyExplainer(BaseEstimator):
     """
     SHAP-based explainer for uncertainty metrics.
+
+    The Shapley values are those of the interventional game
+    ``v_x(S) = mean_b u(x_S, b_{-S})`` over the background rows ``b``. Both
+    computational paths, exact TreeSHAP on component models and the generic
+    explainer on the composed function, receive the same background rows, so
+    they compute the same game.
     """
 
     def __init__(
@@ -43,6 +52,7 @@ class ShapUncertaintyExplainer:
         metric: UncertaintyMetric = "width",
         fast_path: bool = True,
         random_state: int | None = None,
+        background_size: int | None = 100,
     ):
         """
         Initialize SHAP explainer.
@@ -55,6 +65,9 @@ class ShapUncertaintyExplainer:
         confidence : float
 
         algorithm : str
+            Passed to :class:`shap.Explainer` for the generic path. ``"auto"``
+            uses the exact algorithm up to ten features and the permutation
+            approximation beyond.
 
         feature_names : list of str, optional
             Feature names for SHAP explanation output.
@@ -70,8 +83,23 @@ class ShapUncertaintyExplainer:
             always take the generic path, e.g. to compare the two.
 
         random_state : int, optional
-            Seed for stochastic SHAP algorithms, such as permutation SHAP.
+            Seed for stochastic SHAP algorithms, such as permutation SHAP, and
+            for drawing the background rows.
+
+        background_size : int or None, default=100
+            Number of background rows that define the game. Larger background
+            data are subsampled once, without replacement, with ``random_state``
+            (0 when ``None``, which reproduces SHAP's own default subsample).
+            ``None`` keeps every row in both paths; the generic path then costs
+            proportionally more.
         """
+
+        if background_size is not None and (
+            isinstance(background_size, bool)
+            or not isinstance(background_size, Integral)
+            or background_size < 1
+        ):
+            raise ValueError("background_size must be a positive integer or None.")
 
         self.cp = cp
         self.confidence = confidence
@@ -80,9 +108,14 @@ class ShapUncertaintyExplainer:
         self.metric = metric
         self.fast_path = fast_path
         self.random_state = random_state
+        self.background_size = background_size
 
         #: True when the last ``explain()`` call used exact TreeSHAP.
         self.used_fast_path: bool | None = None
+        #: Algorithm of the last ``explain()`` call: ``"tree"`` for the exact
+        #: TreeSHAP shortcut, otherwise the generic SHAP algorithm, e.g.
+        #: ``"exact"`` or ``"permutation"``.
+        self.algorithm_used: str | None = None
 
         self._shap_explainer: shap.Explainer | None = None
         self._background: np.ndarray | None = None
@@ -103,27 +136,44 @@ class ShapUncertaintyExplainer:
             confidence=self.confidence,
             metric=self.metric,
         )
-        self._background = np.asarray(X_background)
+        background = np.asarray(X_background)
+        if self.background_size is not None and len(background) > self.background_size:
+            # Same sampler and default seed that SHAP applies on its own, so the
+            # default game matches plain ``shap.Explainer(f, X_background)``.
+            seed = 0 if self.random_state is None else self.random_state
+            background = shap.utils.sample(background, self.background_size,
+                                           random_state=seed)
+        self._background = background
 
         self._rng = np.random.RandomState(self.random_state)
+        # An explicit masker keeps every background row: SHAP would otherwise
+        # subsample to 100 rows on its own and define a different game.
+        masker = shap.maskers.Independent(background, max_samples=len(background))
         with _shap_random_state(self._rng):
             self._shap_explainer = shap.Explainer(
                 self._target_function,
-                X_background,
+                masker,
                 algorithm=algorithm or self.algorithm,
                 seed=self.random_state,
             )
         self.used_fast_path = None
+        self.algorithm_used = None
 
     def explain(
         self,
         X: np.ndarray,
-    ) -> shap.Explanation:
+    ) -> ShapExplanation:
         """
         Compute SHAP values for X.
 
         Takes the exact TreeSHAP shortcut when it applies, otherwise runs the
         generic SHAP explainer over the composed uncertainty function.
+
+        Returns
+        -------
+        ShapExplanation
+            Attributions, base values and the explained rows. Use
+            :meth:`ShapExplanation.to_shap` for SHAP's own plotting functions.
         """
 
         if self._shap_explainer is None:
@@ -131,31 +181,33 @@ class ShapUncertaintyExplainer:
                 "Explainer not fitted. Call fit() first."
             )
 
-        explanation = None
+        X = np.asarray(X)
+        fast = None
         if self.fast_path:
             fast = tree_shap_values(
                 self.cp,
                 self.metric,
-                np.asarray(X),
+                X,
                 self._background,
                 self._target_function,
             )
-            if fast is not None:
-                values, base_values = fast
-                explanation = shap.Explanation(
-                    values=values,
-                    base_values=base_values,
-                    data=np.asarray(X),
-                )
-        self.used_fast_path = explanation is not None
+        self.used_fast_path = fast is not None
 
-        if explanation is None:
+        if fast is not None:
+            values, base_values = fast
+            self.algorithm_used = "tree"
+        else:
             with _shap_random_state(self._rng):
-                explanation = self._shap_explainer(X)
+                generic = self._shap_explainer(X)
+            values, base_values = generic.values, generic.base_values
+            name = type(self._shap_explainer).__name__
+            self.algorithm_used = name.removesuffix("Explainer").lower() or name
 
-        if self.feature_names is not None:
-            explanation.feature_names = self.feature_names
-
-        explanation.metric = self.metric
-
-        return explanation
+        return ShapExplanation(
+            values=np.asarray(values, dtype=float),
+            base_values=np.asarray(base_values, dtype=float),
+            data=X,
+            feature_names=None if self.feature_names is None else list(self.feature_names),
+            metric=self.metric,
+            algorithm=self.algorithm_used,
+        )
