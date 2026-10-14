@@ -15,6 +15,7 @@ from crepes.extras import (
     MondrianCategorizer,
 )
 import numpy as np
+from sklearn.base import BaseEstimator
 
 from ._validation import check_confidence, check_fit_data
 
@@ -46,7 +47,7 @@ class _DeterministicMondrianCategorizer(MondrianCategorizer):
         return np.searchsorted(self.bin_thresholds[1:-1], scores, side="left")
 
 
-class CrepesConformalPredictor:
+class CrepesConformalPredictor(BaseEstimator):
     """
     Wrapper for conformal regression using crepes.
 
@@ -85,7 +86,7 @@ class CrepesConformalPredictor:
         X_calib: np.ndarray,
         y_calib: np.ndarray,
         **kwargs,
-    ) -> None:
+    ):
         """
         Fit conformal predictor.
 
@@ -134,6 +135,7 @@ class CrepesConformalPredictor:
             y_calib,
             **calibrate_kwargs,
         )
+        return self
 
     def predict(
         self,

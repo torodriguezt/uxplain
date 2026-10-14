@@ -113,6 +113,92 @@ class TestCQRFastPath:
         assert explainer.used_fast_path is False
 
 
+class TestRearrangedCQRFastPath:
+    """Sorting the quantile models keeps only their average affine."""
+
+    def _fit(self, data):
+        cp = CQRConformalPredictor(
+            lower_model=GradientBoostingRegressor(
+                loss="quantile", alpha=0.05, n_estimators=30, random_state=0
+            ),
+            upper_model=GradientBoostingRegressor(
+                loss="quantile", alpha=0.95, n_estimators=30, random_state=0
+            ),
+            rearrange=True,
+        )
+        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        return cp
+
+    @pytest.mark.parametrize("metric", ["width", "lower", "upper"])
+    def test_sorted_endpoints_use_generic_path(self, data, metric):
+        explainer, _ = _explain(self._fit(data), data, metric, fast_path=True)
+        assert explainer.used_fast_path is False
+
+    def test_midpoint_keeps_fast_path(self, data):
+        cp = self._fit(data)
+        explainer, fast = _explain(cp, data, "midpoint", fast_path=True)
+        _, generic = _explain(cp, data, "midpoint", fast_path=False)
+        assert explainer.used_fast_path is True
+        assert np.abs(np.asarray(fast.values) - np.asarray(generic.values)).max() < 1e-4
+
+
+@pytest.fixture(scope="module")
+def large():
+    rng = np.random.default_rng(1)
+    X = rng.standard_normal((700, 3))
+    y = X[:, 0] + np.abs(X[:, 1]) * rng.standard_normal(700)
+    cp = CQRConformalPredictor(
+        GradientBoostingRegressor(loss="quantile", alpha=0.05,
+                                  n_estimators=30, random_state=0),
+        GradientBoostingRegressor(loss="quantile", alpha=0.95,
+                                  n_estimators=30, random_state=0),
+    )
+    cp.fit(X[:300], y[:300], X[300:600], y[300:600])
+    return cp, X[300:600], X[600:620]
+
+
+class TestSharedBackground:
+    """Both computational paths must evaluate the same Shapley game."""
+
+    def test_paths_agree_beyond_one_hundred_background_rows(self, large):
+        cp, background, rows = large
+        explanations = []
+        for fast_path in (True, False):
+            explainer = ShapUncertaintyExplainer(
+                cp, metric="width", fast_path=fast_path, background_size=250,
+            )
+            explainer.fit(background)
+            explanations.append(explainer.explain(rows))
+            assert len(explainer._background) == 250
+        assert np.abs(explanations[0].values - explanations[1].values).max() < 1e-4
+        np.testing.assert_allclose(explanations[0].base_values,
+                                   explanations[1].base_values, atol=1e-4)
+
+    def test_background_is_subsampled_reproducibly(self, large):
+        cp, background, _ = large
+        first = ShapUncertaintyExplainer(cp, random_state=4)
+        first.fit(background)
+        second = ShapUncertaintyExplainer(cp, random_state=4)
+        second.fit(background)
+        assert len(first._background) == 100
+        np.testing.assert_array_equal(first._background, second._background)
+
+    def test_algorithm_used_is_reported(self, large):
+        cp, background, rows = large
+        explainer = ShapUncertaintyExplainer(cp, metric="width")
+        explainer.fit(background)
+        explainer.explain(rows)
+        assert explainer.algorithm_used == "tree"
+        explainer.fast_path = False
+        explainer.explain(rows)
+        assert explainer.algorithm_used == "exact"
+
+    @pytest.mark.parametrize("size", [0, -3, 2.5, True])
+    def test_invalid_background_size_is_rejected(self, large, size):
+        with pytest.raises(ValueError, match="background_size"):
+            ShapUncertaintyExplainer(large[0], background_size=size)
+
+
 class TestCrepesFastPath:
     """The shortcut must accept only the metrics that stay affine."""
 

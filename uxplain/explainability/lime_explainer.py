@@ -5,16 +5,20 @@ LIME explainer for uncertainty metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from lime.lime_tabular import LimeTabularExplainer
 import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator
 
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
+from .base import UncertaintyExplanation
 
 
-@dataclass
-class LIMEExplanation:
+@dataclass(repr=False)
+class LIMEExplanation(UncertaintyExplanation):
     """
     Result of ``LimeUncertaintyExplainer.explain()``.
 
@@ -29,9 +33,12 @@ class LIMEExplanation:
         explained metric for that sample; negative means it decreases it.
 
     metric : str
-        The uncertainty metric being explained ("width", "lower",
-        "upper", or "midpoint"). Used by the plotting layer for axis
-        labels.
+        The explained summary, e.g. ``"width"`` or ``"set_size"``. Used by the
+        plotting layer for axis labels.
+
+    raw_explanations : list, optional
+        The ``lime`` explanation objects, one per sample, including the local
+        fit score of each surrogate.
     """
 
     feature_names: list[str]
@@ -39,8 +46,29 @@ class LIMEExplanation:
     metric: str = "width"
     raw_explanations: list | None = None
 
+    method: ClassVar[str] = "lime"
 
-class LimeUncertaintyExplainer:
+    def to_frame(self) -> pd.DataFrame:
+        """One row per explained observation, one column per feature."""
+        return pd.DataFrame(np.asarray(self.local_coefficients, dtype=float),
+                            columns=[str(name) for name in self.feature_names])
+
+    def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
+        """The local coefficient plot (``kind="local"``) for ``sample_index``.
+
+        Keyword arguments are passed to :func:`uxplain.plots.generate_lime_plots`.
+        """
+        from ..plots import generate_lime_plots
+
+        kinds = [kind] if isinstance(kind, str) else kind
+        return generate_lime_plots(self, kinds=kinds, show=show, **kwargs)
+
+    def _describe(self) -> str:
+        rows, features = np.shape(self.local_coefficients)
+        return f"rows={rows}, features={features}"
+
+
+class LimeUncertaintyExplainer(BaseEstimator):
     """
     LIME-based explainer for uncertainty metrics.
 

@@ -4,6 +4,9 @@ prediction and uncertainty explanation.
 
 Concrete implementations (e.g. crepes, shap, LIME)
 must satisfy these interfaces to be used in the pipeline.
+Any object with these methods works; inheritance is not required.
+See the "Extending uxplain" page of the documentation for complete examples,
+including a backend that wraps MAPIE.
 """
 
 from __future__ import annotations
@@ -14,7 +17,20 @@ import numpy as np
 
 
 class ConformalPredictorProtocol(Protocol):
-    """Interface for regression conformal predictors."""
+    """Interface for regression conformal predictors.
+
+    ``fit`` trains the underlying model(s) on ``(X_train, y_train)`` and
+    calibrates on ``(X_calib, y_calib)``. ``predict`` returns the lower and
+    upper bounds of the intervals at nominal coverage ``confidence``.
+
+    The explained summaries are computed from ``predict``, so it must be a
+    deterministic function of each row (independent of the batch it arrives
+    in) and accept arbitrary feature combinations: SHAP and partial dependence
+    evaluate it on rows that mix observed and background values. The pipeline
+    clones the predictor before fitting it, so give it ``get_params`` (e.g. by
+    inheriting from :class:`sklearn.base.BaseEstimator`) or make it
+    deep-copyable.
+    """
 
     def fit(
         self,
@@ -22,7 +38,7 @@ class ConformalPredictorProtocol(Protocol):
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> None: ...
+    ) -> Any: ...
 
     def predict(
         self,
@@ -36,6 +52,8 @@ class ConformalClassifierProtocol(Protocol):
 
     Implementations must expose ``predict_set``, ``predict_p``,
     and a ``classes_`` attribute aligned with the model's class order.
+    The same determinism and cloning requirements as for
+    :class:`ConformalPredictorProtocol` apply.
     """
 
     classes_: np.ndarray
@@ -46,7 +64,7 @@ class ConformalClassifierProtocol(Protocol):
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> None: ...
+    ) -> Any: ...
 
     def predict_set(
         self,
@@ -65,7 +83,15 @@ class ConformalClassifierProtocol(Protocol):
 
 
 class UncertaintyExplainerProtocol(Protocol):
-    """Interface for uncertainty explainers."""
+    """Interface for uncertainty explainers.
+
+    ``fit`` receives the background data (keyword arguments of
+    :meth:`~uxplain.UncertaintyExplanationPipeline.explain` are forwarded to
+    it); ``explain`` returns the explanation of the rows ``X``. Return a
+    subclass of :class:`~uxplain.UncertaintyExplanation` so that the result's
+    ``feature_importance()`` and ``plot()`` work. If the explainer has a ``cp``
+    attribute, the pipeline points it to its fitted conformal predictor.
+    """
 
     def fit(
         self,

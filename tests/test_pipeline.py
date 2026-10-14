@@ -8,8 +8,11 @@ from sklearn.linear_model import Ridge
 from uxplain import (
     ClassificationExplanationResult,
     CQRConformalPredictor,
+    CrepesConformalClassifier,
     ExplanationResult,
     LIMEExplanation,
+    ShapExplanation,
+    UncertaintyExplanation,
     UncertaintyExplanationPipeline,
 )
 from uxplain.explainability.pdp_explainer import PDPExplanation, PDPUncertaintyExplainer
@@ -145,9 +148,11 @@ class TestFitPredict:
     def test_refit_with_array_clears_stale_feature_names(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
+        assert pipeline.feature_names_in_.tolist() == list("abcd")
         pipeline.fit(data["X_train"], data["y_train"])
         assert pipeline._feature_names is None
-        assert pipeline.explainer.feature_names is None
+        assert pipeline.explainer_.feature_names is None
+        assert not hasattr(pipeline, "feature_names_in_")
 
     @pytest.mark.parametrize("dataframe_first", [False, True])
     def test_array_fit_preserves_custom_explainer_feature_names(self, data, dataframe_first):
@@ -158,11 +163,15 @@ class TestFitPredict:
         pipeline = _make_pipeline(explainer=custom_explainer)
         if dataframe_first:
             pipeline.fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
-            assert custom_explainer.feature_names == list("abcd")
+            assert pipeline.explainer_.feature_names == list("abcd")
         for _ in range(2):
             pipeline.fit(data["X_train"], data["y_train"])
-            assert custom_explainer.feature_names == custom_names
+            assert pipeline.explainer_.feature_names == custom_names
             assert pipeline._feature_names is None
+        # The explainer passed as a parameter is cloned, never modified.
+        assert custom_explainer.feature_names == custom_names
+        assert custom_explainer.cp is None
+        assert pipeline.explainer_.cp is pipeline.conformal_predictor_
 
     def test_failed_refit_invalidates_pipeline(self, data):
         pipeline = _make_pipeline()
@@ -199,17 +208,21 @@ class TestExplainShap:
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
-        assert isinstance(result.explanation_values, shap.Explanation)
+        assert isinstance(result.explanation_values, ShapExplanation)
+        assert isinstance(result.explanation_values, UncertaintyExplanation)
+        converted = result.explanation_values.to_shap()
+        assert isinstance(converted, shap.Explanation)
+        np.testing.assert_array_equal(converted.values, result.explanation_values.values)
 
     def test_shap_explainer_rebuilt_on_kwarg_change(self, data):
         pipeline = _make_pipeline(xai_method="shap")
         pipeline.fit(data["X_train"], data["y_train"])
         X_small = data["X_test"][:5]
         pipeline.explain(X_small, show_plots=False)
-        old_id = id(pipeline.explainer._shap_explainer)
+        old_id = id(pipeline.explainer_._shap_explainer)
         # Changing algorithm kwarg should trigger a rebuild
         pipeline.explain(X_small, show_plots=False, algorithm="permutation")
-        new_id = id(pipeline.explainer._shap_explainer)
+        new_id = id(pipeline.explainer_._shap_explainer)
         assert old_id != new_id
 
     def test_invalid_plot_kind_raises(self, data):
@@ -260,7 +273,7 @@ class TestExplainPDP:
     def test_constructor_features_survive_fit(self, data):
         pipeline = _make_pipeline(xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
-        explainer = PDPUncertaintyExplainer(pipeline.cp, features=[0, 2])
+        explainer = PDPUncertaintyExplainer(pipeline.conformal_predictor_, features=[0, 2])
         explainer.fit(data["X_calib"])
         assert explainer.explain(data["X_test"][:10]).features == [0, 2]
 
@@ -323,8 +336,8 @@ def _fit_pdp_explanation(data, kind: str):
     """Helper: fit a PDP explainer with the given ``kind`` and return its explanation."""
     pipeline = _make_pipeline(xai_method="pdp")
     pipeline.fit(data["X_train"], data["y_train"])
-    pipeline.explainer.fit(data["X_calib"], kind=kind)
-    return pipeline.explainer.explain(data["X_test"][:10])
+    pipeline.explainer_.fit(data["X_calib"], kind=kind)
+    return pipeline.explainer_.explain(data["X_test"][:10])
 
 
 class TestPDPKindValidation:
@@ -360,7 +373,9 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(model=classifier)
-        assert pipeline.task == "classification"
+        assert pipeline.task == "auto"  # the parameter is stored as given
+        pipeline.fit(classification_data["X_train"], classification_data["y_train"])
+        assert pipeline.task_ == "classification"
 
     def test_classification_requires_model(self):
         with pytest.raises(ValueError, match="classification.*requires a 'model'"):
@@ -441,7 +456,7 @@ class TestClassificationPipeline:
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
         )
-        assert pipeline.cp.method == "standard"
+        assert pipeline.conformal_predictor_.method == "standard"
 
     @pytest.mark.parametrize("method", ["class_cond", "mondrian"])
     def test_conformal_method_class_cond_and_mondrian(
@@ -479,7 +494,8 @@ class TestClassificationPipeline:
     ):
         pipeline = UncertaintyExplanationPipeline(model=classifier, random_state=0)
         splits = []
-        monkeypatch.setattr(pipeline.cp, "fit", lambda *arrays: splits.append(arrays))
+        monkeypatch.setattr(CrepesConformalClassifier, "fit",
+                            lambda self, *arrays: splits.append(arrays))
         X = np.arange(60).reshape(30, 2)
         labels = [np.arange(30) % 2, np.r_[np.zeros(29), 1]]
         for y in labels:

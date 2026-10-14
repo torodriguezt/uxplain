@@ -130,6 +130,39 @@ class TestCQRConformalPredictor:
         with pytest.raises(RuntimeError, match="not fitted"):
             cp.predict(data["X_test"])
 
+    def test_rearrange_sorts_crossed_quantile_models(self, data, quantile_lower, quantile_upper):
+        # Swapping the models makes every estimated "lower" quantile the upper one.
+        crossed = CQRConformalPredictor(quantile_upper, quantile_lower)
+        crossed.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        q_low, q_high = crossed._quantiles(data["X_test"])
+        assert np.any(q_low > q_high)
+
+        sorted_cp = CQRConformalPredictor(quantile_upper, quantile_lower, rearrange=True)
+        sorted_cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        q_low, q_high = sorted_cp._quantiles(data["X_test"])
+        assert np.all(q_low <= q_high)
+        lower, upper = sorted_cp.predict(data["X_test"])
+        coverage = np.mean((data["y_test"] >= lower) & (data["y_test"] <= upper))
+        assert coverage >= 0.7
+
+    def test_rearrange_keeps_ordered_models_unchanged(self, data):
+        class Shift:
+            def __init__(self, offset):
+                self.offset = offset
+
+            def fit(self, X, y):
+                return self
+
+            def predict(self, X):
+                return np.asarray(X)[:, 0] + self.offset
+
+        intervals = []
+        for rearrange in (False, True):
+            cp = CQRConformalPredictor(Shift(-1.0), Shift(1.0), rearrange=rearrange)
+            cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+            intervals.append(cp.predict(data["X_test"]))
+        np.testing.assert_allclose(intervals[0], intervals[1])
+
     def test_coverage_approximately_nominal(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
         cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])

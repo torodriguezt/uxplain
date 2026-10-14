@@ -10,6 +10,7 @@ from typing import Literal
 
 from crepes import WrapClassifier
 import numpy as np
+from sklearn.base import BaseEstimator
 
 from ._validation import check_confidence, check_fit_data
 
@@ -20,7 +21,7 @@ ClassificationConformalMethod = Literal[
 ]
 
 
-class CrepesConformalClassifier:
+class CrepesConformalClassifier(BaseEstimator):
     """
     Wrapper for conformal classification using crepes.
 
@@ -76,7 +77,6 @@ class CrepesConformalClassifier:
         self.random_state = random_state
         self.smoothing = smoothing
         self.wrapper = None
-        self.classes_ = None
 
     def fit(
         self,
@@ -85,7 +85,7 @@ class CrepesConformalClassifier:
         X_calib: np.ndarray,
         y_calib: np.ndarray,
         **kwargs,
-    ) -> None:
+    ):
         """
         Fit conformal classifier.
 
@@ -123,6 +123,7 @@ class CrepesConformalClassifier:
             y_calib,
             **calibrate_kwargs,
         )
+        return self
 
     def predict_set(
         self,

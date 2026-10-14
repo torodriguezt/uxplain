@@ -1,10 +1,11 @@
 """
 Real-world labour-force datasets used in the paper's illustrations.
 
-Two national household surveys, loaded through a small \\pkg{scikit-learn}-style
+Two national household surveys, loaded through a small scikit-learn-style
 interface: each loader returns a :class:`sklearn.utils.Bunch` (with ``data``,
-``target``, ``frame``, ``feature_names`` and ``DESCR``), or the ready-to-model
-``(X, y)`` pair when called with ``return_X_y=True``::
+``target``, ``frame``, ``feature_names``, ``groups``, ``provenance`` and
+``DESCR``), or the ready-to-model ``(X, y)`` pair when called with
+``return_X_y=True``::
 
     from uxplain.datasets import fetch_pnadc, load_geih
 
@@ -18,17 +19,36 @@ interface: each loader returns a :class:`sklearn.utils.Bunch` (with ``data``,
   :func:`load_geih` reads a copy the user has downloaded from DANE; see the note
   on data terms below.
 
-Validation scope
-----------------
-The current release candidate's loader checks use synthetic local extracts.
-The loaders have not been revalidated against real PNAD Continua or GEIH
-microdata after the latest parsing and target-leakage fixes. Before scientific
-use, verify the period's dictionary, row counts, joins, missing values and target
-coding against the producer's files. These helpers do not establish survey
-design validity or exchangeability for conformal coverage.
+Coding of the modelling columns
+-------------------------------
+Categorical survey codes are recoded to indicators before modelling, so that no
+explainer treats a nominal code as a magnitude: ``female`` (1 = woman),
+``black_or_brown`` (PNAD, 1 = *preta* or *parda*, the grouping IBGE uses to
+report race inequality; code 9, "ignored", is missing), ``urban`` (PNAD,
+1 = urban) and ``informal`` (1 = does not contribute to social security,
+0 = contributes, missing otherwise; GEIH workers who already receive a pension
+are missing). Education is the ordinal level attained (PNAD ``VD3004``, 1–7;
+GEIH ``P3042``, 1–13), and ``hours`` are the usual weekly hours worked.
 
-Data terms and provenance
--------------------------
+Households and sampling
+-----------------------
+Members of one household share unobserved characteristics, so a person-level
+random split places correlated observations on both sides of a calibration
+split. Each loader therefore returns household identifiers in ``groups``, and
+``one_per_household=True`` keeps a single randomly chosen eligible person per
+household. With that option the conformal exchangeability assumption concerns
+households rather than household members. Neither option implements the
+survey's sampling design (strata, primary sampling units, weights).
+
+Reproducibility
+---------------
+Producers re-release microdata under new file names (IBGE date-stamps every
+release). Pass ``archive`` and ``sha256`` to :func:`fetch_pnadc` to pin one
+release; both loaders report the files they read, with their SHA-256 digests, in
+``provenance``.
+
+Data terms
+----------
 No survey data is bundled with or redistributed by this package; the loaders
 either fetch from the producer's own server or read a local copy the user
 obtained themselves. When you use these datasets you must cite the producer:
@@ -41,14 +61,13 @@ obtained themselves. When you use these datasets you must cite the producer:
   :func:`load_geih` never downloads or ships the data. Obtain a month from
   https://microdatos.dane.gov.co and point the loader at it.
 
-Labour income is a deliberately good showcase for the regression side: its
-spread grows with education and with informality, so the *width* of a conformal
-interval is driven by different features than its centre — exactly the
-distinction the package is built to expose.
+These helpers prepare predictive examples. They do not establish survey-design
+validity or exchangeability for conformal coverage.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 from numbers import Integral
 import os
@@ -57,6 +76,7 @@ import re
 import urllib.request
 import zipfile
 
+import numpy as np
 import pandas as pd
 from sklearn.utils import Bunch
 
@@ -64,6 +84,7 @@ __all__ = [
     "GEIH_CITATION",
     "GEIH_FEATURES",
     "GEIH_VARIABLES",
+    "MAJOR_OCCUPATION_GROUPS",
     "PNADC_CITATION",
     "PNADC_FEATURES",
     "PNADC_VARIABLES",
@@ -90,20 +111,25 @@ GEIH_CITATION = (
 )
 
 #: PNAD Contínua source columns kept by :func:`fetch_pnadc`, mapped to readable
-#: names.
+#: names. ``UPA``, ``V1008`` and ``V1014`` identify the household within a
+#: quarter.
 PNADC_VARIABLES: dict[str, str] = {
+    "UPA": "psu",                 # primary sampling unit
+    "V1008": "dwelling",          # dwelling selection number within the PSU
+    "V1014": "panel",             # rotation group
     "UF": "state",
-    "V1022": "urban",             # urban / rural
-    "V2007": "sex",
+    "V1022": "urban_code",        # 1 urban, 2 rural
+    "V2007": "sex",               # 1 man, 2 woman
     "V2009": "age",
-    "V2010": "race",
-    "VD3004": "education",        # highest level attained
+    "V2010": "race",              # 1 white, 2 black, 3 Asian, 4 brown, 5 Indigenous, 9 ignored
+    "VD3004": "education",        # highest level attained, 1-7
     "VD4001": "in_labour_force",
     "VD4002": "employed",
     "VD4009": "job_position",     # employee w/ or w/o formal contract, etc.
-    "VD4012": "pension_contrib",  # contributes to social security
-    "VD4020": "income",           # monthly labour income (target)
-    "VD4035": "hours",            # hours actually worked
+    "V4010": "occupation",        # 4-digit COD occupation code (ISCO-08 based)
+    "VD4012": "pension_contrib",  # 1 contributes to social security, 2 does not
+    "VD4020": "income",           # effective monthly labour income, all jobs (target)
+    "VD4031": "hours",            # usual weekly hours, all jobs
     "V1028": "weight",            # calibrated survey weight
 }
 
@@ -114,32 +140,34 @@ PNADC_VARIABLES: dict[str, str] = {
 #: ``P6210`` to ``P3042``, and the occupation code became ``OFICIO_C8``). Pass an
 #: explicit mapping to :func:`load_geih` for earlier years.
 GEIH_VARIABLES: dict[str, str] = {
-    "P3271": "sex",
+    "P3271": "sex",               # 1 man, 2 woman
     "P6040": "age",
-    "P3042": "education",
-    "P6800": "hours",
+    "P3042": "education",         # highest level attained, 1-13
+    "P6800": "hours",             # usual weekly hours in the main job
     "INGLABO": "income",          # monthly labour income
-    "OFICIO_C8": "occupation",    # 4-digit occupation code
+    "OFICIO_C8": "occupation",    # 4-digit CIUO-08 A.C. occupation code
     "RAMA2D_R4": "industry",      # 2-digit industry code
-    "P6920": "pension_contrib",   # proxy for formal employment
+    "P6920": "pension_contrib",   # 1 contributes, 2 does not, 3 already pensioned
     "FEX_C18": "weight",          # survey expansion factor
 }
 
 #: Default modelling features for each survey (the ones used in the paper).
 PNADC_FEATURES: list[str] = [
-    "age", "hours", "education", "sex", "race", "urban", "informal",
+    "age", "hours", "education", "female", "black_or_brown", "urban", "informal",
 ]
 GEIH_FEATURES: list[str] = [
-    "age", "hours", "education", "sex", "income", "informal",
+    "age", "hours", "education", "female", "income", "informal",
 ]
 
-#: Person key that links GEIH modules to each other.
+#: Person key that links GEIH modules to each other; the first two columns
+#: identify the household.
 GEIH_MERGE_KEYS: tuple[str, ...] = ("DIRECTORIO", "SECUENCIA_P", "ORDEN")
 
-#: Major occupational groups: the leading digit of the ISCO-08 (CIUO-08 A.C.)
-#: code. Collapsing the 4-digit occupation to its major group yields a target
-#: with a workable number of classes for conformal classification.
-CIUO_MAJOR_GROUPS: dict[str, str] = {
+#: Major occupational groups: the leading digit of an ISCO-08-based code. GEIH
+#: uses the Colombian adaptation (CIUO-08 A.C.) and PNAD Contínua the Brazilian
+#: one (COD); both keep the ISCO-08 major groups. In PNAD, group 0 also contains
+#: military police and military firefighters.
+MAJOR_OCCUPATION_GROUPS: dict[str, str] = {
     "0": "Armed forces",
     "1": "Managers",
     "2": "Professionals",
@@ -151,10 +179,8 @@ CIUO_MAJOR_GROUPS: dict[str, str] = {
     "8": "Plant and machine operators",
     "9": "Elementary occupations",
 }
-
-# Both surveys code social-security contribution as 1 = contributes. Defining
-# informality this way keeps the two labels comparable.
-_CONTRIBUTES_CODE = "1"
+#: Backwards-compatible alias.
+CIUO_MAJOR_GROUPS = MAJOR_OCCUPATION_GROUPS
 
 
 def default_cache_dir() -> Path:
@@ -164,12 +190,53 @@ def default_cache_dir() -> Path:
     return Path(root) if root else Path.home() / ".cache" / "uxplain"
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 # ---------------------------------------------------------------------------
-# Shared Bunch / (X, y) packaging
+# Shared recoding and packaging
 # ---------------------------------------------------------------------------
 
+def _codes(series: pd.Series) -> pd.Series:
+    """Survey codes as stripped strings, with ``"2.0"`` read as ``"2"``."""
+    codes = series.astype("string").str.strip()
+    return codes.str.replace(r"\.0+$", "", regex=True)
+
+
+def _indicator(series: pd.Series, true_codes, false_codes) -> pd.Series:
+    """1.0 for ``true_codes``, 0.0 for ``false_codes``, missing otherwise."""
+    codes = _codes(series)
+    out = pd.Series(np.nan, index=series.index, dtype=float)
+    out[codes.isin(list(true_codes)).fillna(False).to_numpy(dtype=bool)] = 1.0
+    out[codes.isin(list(false_codes)).fillna(False).to_numpy(dtype=bool)] = 0.0
+    return out
+
+
+def _informality(contribution: pd.Series, informal_codes=("2",)) -> pd.Series:
+    """1 = does not contribute, 0 = contributes; other or missing codes stay missing."""
+    return _indicator(contribution, informal_codes, ("1",))
+
+
+def _ordinal(series: pd.Series, low: int, high: int) -> pd.Series:
+    """Numeric ordinal codes inside ``[low, high]``; anything else is missing."""
+    values = pd.to_numeric(_codes(series), errors="coerce").astype(float)
+    return values.where(values.between(low, high))
+
+
+def _major_group(occupation: pd.Series) -> pd.Series:
+    """Map a 1-4 digit occupation code to its ISCO-08 major group name."""
+    codes = _codes(occupation)
+    codes = codes.where(codes.str.fullmatch(r"\d{1,4}", na=False))
+    return codes.str.zfill(4).str[0].map(MAJOR_OCCUPATION_GROUPS)
+
+
 def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
-              descr, citation):
+              descr, citation, one_per_household=False, provenance=None):
     """Coerce the modelling columns, drop unusable rows, and package the result.
 
     Returns ``(X, y)`` when ``return_X_y`` is set, otherwise a
@@ -202,6 +269,18 @@ def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
     subset = features + [target]
     work[subset] = work[subset].replace([float("inf"), float("-inf")], float("nan"))
     work = work.dropna(subset=subset)
+
+    has_groups = "household" in work.columns and work["household"].notna().all()
+    if one_per_household:
+        if not has_groups:
+            raise ValueError(
+                "one_per_household=True needs household identifiers, which these "
+                "files do not provide."
+            )
+        # One eligible person per household, chosen at random but reproducibly.
+        work = work.groupby("household", sort=False).sample(
+            n=1, random_state=random_state
+        )
     if subsample is not None and subsample < len(work):
         work = work.sample(n=subsample, random_state=random_state)
     work = work.reset_index(drop=True)
@@ -213,6 +292,8 @@ def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
     return Bunch(
         data=X, target=y, frame=work, feature_names=features,
         target_name=target, DESCR=descr, citation=citation,
+        groups=work["household"].to_numpy() if has_groups else None,
+        provenance=dict(provenance or {}),
     )
 
 
@@ -244,14 +325,15 @@ def _parse_sas_layout(text: str) -> dict[str, tuple[int, int]]:
     return layout
 
 
-def _pnadc_layout(cache_dir: Path) -> dict[str, tuple[int, int]]:
+def _pnadc_layout(cache_dir: Path) -> tuple[dict[str, tuple[int, int]], Path]:
     archive = _download(_IBGE_DICT, cache_dir / "pnadc_dictionary.zip")
     with zipfile.ZipFile(archive) as zf:
         name = next(n for n in zf.namelist() if n.lower().endswith(".sas"))
-        return _parse_sas_layout(zf.read(name).decode("latin-1"))
+        return _parse_sas_layout(zf.read(name).decode("latin-1")), archive
 
 
-def _quarter_url(year: int, quarter: int) -> str:
+def _latest_quarter_archive(year: int, quarter: int) -> str:
+    """Name of the newest IBGE release for a quarter, read from the server listing."""
     listing_url = f"{_IBGE_ROOT}/{year}/"
     with urllib.request.urlopen(listing_url) as response:
         listing = response.read().decode("utf-8", errors="replace")
@@ -262,27 +344,93 @@ def _quarter_url(year: int, quarter: int) -> str:
             f"No PNAD Continua archive for {year} Q{quarter} at {listing_url}"
         )
     # The newest date-stamped file sorts last lexicographically.
-    return listing_url + max(names)
+    return max(names)
 
 
-def _pnadc_frame(year, quarter, cache_dir, employed_only, min_income):
-    """Download and parse one quarter of PNAD Contínua into a tidy frame."""
+def _pnadc_archive(year, quarter, cache_dir: Path, archive=None, sha256=None):
+    """Locate (or download) one quarter's archive and verify its checksum.
+
+    Returns ``(path, release_name, digest)``. ``release_name`` is ``None`` when
+    only a legacy cache file of unknown release is available.
+    """
+    prefix = f"PNADC_{quarter:02d}{year}"
+    if archive is not None and not re.fullmatch(rf"{re.escape(prefix)}\w*\.zip", archive):
+        raise ValueError(
+            f"archive must be an IBGE file name for {year} Q{quarter}, "
+            f"e.g. '{prefix}_YYYYMMDD.zip'; got {archive!r}."
+        )
+    expected = sha256.lower() if sha256 is not None else None
+    legacy = cache_dir / f"pnadc_{year}q{quarter}.zip"
+
+    if archive is not None:
+        candidates = [(cache_dir / archive, archive)]
+        # A legacy cache file can stand in for the requested release only when
+        # its checksum proves that it is that release.
+        if expected is not None:
+            candidates.append((legacy, archive))
+    else:
+        cached = sorted(cache_dir.glob(f"{prefix}*.zip"), reverse=True)
+        candidates = [(path, path.name) for path in cached] + [(legacy, None)]
+
+    for path, release in candidates:
+        if not (path.exists() and path.stat().st_size > 0):
+            continue
+        digest = _sha256(path)
+        if expected is None or digest == expected:
+            return path, release, digest
+        if path != legacy:
+            raise ValueError(
+                f"Checksum mismatch for {path}: expected {expected}, got {digest}. "
+                "The producer may have re-released the file; remove it to download "
+                "again, or update the pinned checksum."
+            )
+
+    release = archive or _latest_quarter_archive(year, quarter)
+    path = _download(f"{_IBGE_ROOT}/{year}/{release}", cache_dir / release)
+    digest = _sha256(path)
+    if expected is not None and digest != expected:
+        raise ValueError(
+            f"Checksum mismatch for the downloaded {release}: expected {expected}, "
+            f"got {digest}."
+        )
+    return path, release, digest
+
+
+def _recode_pnadc(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add modelling columns (indicators, ordinal codes, household key)."""
+    frame = frame.copy()
+    for column in ("age", "income", "hours", "weight"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame["female"] = _indicator(frame["sex"], ("2",), ("1",))
+    frame["black_or_brown"] = _indicator(frame["race"], ("2", "4"), ("1", "3", "5"))
+    frame["urban"] = _indicator(frame["urban_code"], ("1",), ("2",))
+    frame["informal"] = _informality(frame["pension_contrib"])
+    frame["education"] = _ordinal(frame["education"], 1, 7)
+    frame["occupation_group"] = _major_group(frame["occupation"])
+    keys = [_codes(frame[c]) for c in ("psu", "dwelling", "panel")]
+    frame["household"] = keys[0] + "-" + keys[1] + "-" + keys[2]
+    return frame
+
+
+def _pnadc_frame(year, quarter, cache_dir, employed_only, min_income,
+                 archive=None, sha256=None):
+    """Download and parse one quarter of PNAD Contínua into a tidy frame.
+
+    Returns ``(frame, provenance)``.
+    """
     cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
-    layout = _pnadc_layout(cache_dir)
+    layout, dictionary = _pnadc_layout(cache_dir)
     absent = [v for v in PNADC_VARIABLES if v not in layout]
     if absent:
         raise KeyError(f"Variables absent from the IBGE layout: {absent}")
 
-    # Resolve the remote name only when the archive is not already cached, so a
-    # second run needs no network at all.
-    archive = cache_dir / f"pnadc_{year}q{quarter}.zip"
-    if not (archive.exists() and archive.stat().st_size > 0):
-        archive = _download(_quarter_url(year, quarter), archive)
+    # Cached archives are used without network access.
+    path, release, digest = _pnadc_archive(year, quarter, cache_dir, archive, sha256)
 
     wanted = sorted(PNADC_VARIABLES, key=lambda v: layout[v][0])
     colspecs = [(layout[v][0] - 1, layout[v][0] - 1 + layout[v][1])
                 for v in wanted]
-    with zipfile.ZipFile(archive) as zf:
+    with zipfile.ZipFile(path) as zf:
         name = next(n for n in zf.namelist() if n.lower().endswith(".txt"))
         with zf.open(name) as handle:
             frame = pd.read_fwf(
@@ -290,15 +438,18 @@ def _pnadc_frame(year, quarter, cache_dir, employed_only, min_income):
                 colspecs=colspecs, names=wanted, dtype=str,
             )
 
-    frame = frame.rename(columns=PNADC_VARIABLES)
-    for column in ("age", "income", "hours", "weight"):
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame["informal"] = _informality(frame["pension_contrib"])
-
+    frame = _recode_pnadc(frame.rename(columns=PNADC_VARIABLES))
     if employed_only:
-        frame = frame[(frame["employed"] == "1")
-                      & (frame["income"] >= min_income)]
-    return frame.reset_index(drop=True)
+        employed = (_codes(frame["employed"]) == "1").fillna(False).to_numpy(dtype=bool)
+        frame = frame[employed & (frame["income"] >= min_income).to_numpy()]
+    provenance = {
+        "archive": release,
+        "archive_sha256": digest,
+        "cached_file": path.name,
+        "dictionary": _IBGE_DICT.rsplit("/", 1)[-1],
+        "dictionary_sha256": _sha256(dictionary),
+    }
+    return frame.reset_index(drop=True), provenance
 
 
 def fetch_pnadc(
@@ -312,6 +463,9 @@ def fetch_pnadc(
     random_state: int | None = None,
     employed_only: bool = True,
     min_income: float = 1.0,
+    one_per_household: bool = False,
+    archive: str | None = None,
+    sha256: str | None = None,
     cache_dir: str | Path | None = None,
 ):
     """
@@ -329,7 +483,7 @@ def fetch_pnadc(
         Modelling columns. Defaults to :data:`PNADC_FEATURES`.
     target
         Response column. ``"income"`` (regression, default). Other useful
-        choices: ``"informal"`` (classification).
+        choices: ``"informal"`` and ``"occupation_group"`` (classification).
     return_X_y
         If ``True``, return ``(X, y)`` instead of a
         :class:`~sklearn.utils.Bunch`.
@@ -337,23 +491,36 @@ def fetch_pnadc(
         If given, randomly keep this many rows (useful to keep an illustration
         fast; the conformal guarantee does not depend on the sample size).
     random_state
-        Seed for ``subsample``.
+        Seed for ``one_per_household`` and ``subsample``.
     employed_only, min_income
         Restrict to employed respondents with a labour income at least
         ``min_income`` (zeros mean "no income", not low income).
+    one_per_household
+        Keep one randomly chosen eligible person per household (identified by
+        ``UPA``, ``V1008`` and ``V1014``) before subsampling.
+    archive
+        Exact IBGE file name, e.g. ``"PNADC_012024_20250815.zip"``. IBGE
+        re-releases quarters under new date stamps; pin one for reproducible
+        results. By default the newest cached release is used, or else the
+        newest release on the server.
+    sha256
+        Expected SHA-256 digest of the archive. A mismatch raises an error.
     cache_dir
         Download cache. Defaults to :func:`default_cache_dir`.
 
     Returns
     -------
     sklearn.utils.Bunch or tuple
-        A ``Bunch`` with ``data``, ``target``, ``frame`` (the full parsed
-        table), ``feature_names``, ``target_name``, ``DESCR`` and
+        A ``Bunch`` with ``data``, ``target``, ``frame`` (the parsed rows used),
+        ``feature_names``, ``target_name``, ``groups`` (household identifiers),
+        ``provenance`` (archive name and SHA-256 digests), ``DESCR`` and
         ``citation``; or ``(X, y)`` when ``return_X_y=True``.
     """
     if isinstance(quarter, bool) or not isinstance(quarter, Integral) or quarter not in (1, 2, 3, 4):
         raise ValueError("quarter must be an integer from 1 to 4.")
-    frame = _pnadc_frame(year, quarter, cache_dir, employed_only, min_income)
+    frame, provenance = _pnadc_frame(
+        year, quarter, cache_dir, employed_only, min_income, archive, sha256,
+    )
     if features is None:
         features = [name for name in PNADC_FEATURES if name != target]
     descr = (f"PNAD Continua {year} Q{quarter} (IBGE). "
@@ -362,6 +529,7 @@ def fetch_pnadc(
         frame, features, target,
         return_X_y=return_X_y, subsample=subsample, random_state=random_state,
         descr=descr, citation=PNADC_CITATION,
+        one_per_household=one_per_household, provenance=provenance,
     )
 
 
@@ -384,14 +552,11 @@ def _read_geih_module(path: Path) -> pd.DataFrame:
                        encoding="latin-1")
 
 
-def _informality(contribution: pd.Series) -> pd.Series:
-    """Preserve missing contribution codes instead of labelling them informal."""
-    codes = pd.to_numeric(contribution.astype("string").str.strip(), errors="coerce")
-    return codes.ne(int(_CONTRIBUTES_CODE))
-
-
 def _geih_frame(path, variables, min_income):
-    """Merge the GEIH modules under ``path`` into one tidy person-level frame."""
+    """Merge the GEIH modules under ``path`` into one tidy person-level frame.
+
+    Returns ``(frame, provenance)``.
+    """
     variables = variables or GEIH_VARIABLES
 
     if isinstance(path, (str, Path)):
@@ -434,6 +599,10 @@ def _geih_frame(path, variables, min_income):
                     if c not in frame.columns or c in shared]
         frame = frame.merge(module[new_cols], on=shared, how="inner", validate="one_to_one")
 
+    household = None
+    if all(key in frame.columns for key in GEIH_MERGE_KEYS[:2]):
+        household = _codes(frame["DIRECTORIO"]) + "-" + _codes(frame["SECUENCIA_P"])
+
     present = {src: dst for src, dst in variables.items()
                if src in frame.columns}
     if "income" not in present.values():
@@ -442,23 +611,27 @@ def _geih_frame(path, variables, min_income):
             f"{sorted(frame.columns)[:25]}. Pass an explicit `variables` mapping."
         )
     frame = frame[list(present)].rename(columns=present)
+    if household is not None:
+        frame["household"] = household.to_numpy()
 
     for column in ("age", "income", "hours", "weight"):
         if column in frame.columns:
             frame[column] = pd.to_numeric(
                 frame[column].str.replace(",", ".", regex=False), errors="coerce",
             )
+    if "sex" in frame.columns:
+        frame["female"] = _indicator(frame["sex"], ("2",), ("1",))
+    if "education" in frame.columns:
+        frame["education"] = _ordinal(frame["education"], 1, 13)
     if "pension_contrib" in frame.columns:
+        # Code 3 ("already pensioned") has no contribution status: missing.
         frame["informal"] = _informality(frame["pension_contrib"])
     if "occupation" in frame.columns:
-        codes = frame["occupation"].astype("string").str.strip()
-        codes = codes.str.replace(r"\.0+$", "", regex=True)
-        codes = codes.where(codes.str.fullmatch(r"\d{1,4}", na=False))
-        leading = codes.str.zfill(4).str[0]
-        frame["occupation_group"] = leading.map(CIUO_MAJOR_GROUPS)
+        frame["occupation_group"] = _major_group(frame["occupation"])
 
     frame = frame[frame["income"].fillna(0) >= min_income]
-    return frame.reset_index(drop=True)
+    provenance = {"files": {p.name: _sha256(p) for p in paths}}
+    return frame.reset_index(drop=True), provenance
 
 
 def load_geih(
@@ -471,6 +644,7 @@ def load_geih(
     random_state: int | None = None,
     variables: dict[str, str] | None = None,
     min_income: float = 1.0,
+    one_per_household: bool = False,
 ):
     """
     Load a locally downloaded GEIH extract (DANE, Colombia).
@@ -497,25 +671,31 @@ def load_geih(
         Modelling columns. Defaults to :data:`GEIH_FEATURES`.
     target
         Response column. ``"occupation_group"`` (classification, default); the
-        4-digit occupation collapsed to its ISCO-08 major group. Other choices:
-        ``"income"`` (regression), ``"informal"`` (binary classification).
+        4-digit CIUO-08 A.C. occupation collapsed to its major group. Other
+        choices: ``"income"`` (regression), ``"informal"`` (binary
+        classification).
     return_X_y
         If ``True``, return ``(X, y)`` instead of a
         :class:`~sklearn.utils.Bunch`.
     subsample, random_state
-        Optionally keep a random subset of ``subsample`` rows.
+        Optionally keep a random subset of ``subsample`` rows; ``random_state``
+        also seeds ``one_per_household``.
     variables
         Override the source-column mapping (DANE renames fields between years).
         Defaults to :data:`GEIH_VARIABLES`.
     min_income
         Drop incomes below this value.
+    one_per_household
+        Keep one randomly chosen eligible person per household (identified by
+        ``DIRECTORIO`` and ``SECUENCIA_P``) before subsampling.
 
     Returns
     -------
     sklearn.utils.Bunch or tuple
-        Same shape as :func:`fetch_pnadc`.
+        Same shape as :func:`fetch_pnadc`; ``provenance`` lists the SHA-256
+        digest of every module file read.
     """
-    frame = _geih_frame(path, variables, min_income)
+    frame, provenance = _geih_frame(path, variables, min_income)
     if features is None:
         features = [name for name in GEIH_FEATURES if name != target]
     descr = (f"GEIH (DANE), local extract. Target: {target}. {GEIH_CITATION}")
@@ -523,4 +703,5 @@ def load_geih(
         frame, features, target,
         return_X_y=return_X_y, subsample=subsample, random_state=random_state,
         descr=descr, citation=GEIH_CITATION,
+        one_per_household=one_per_household, provenance=provenance,
     )
