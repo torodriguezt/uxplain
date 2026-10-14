@@ -22,18 +22,22 @@ class CQRConformalPredictor(BaseEstimator):
 
     Parameters
     ----------
-    lower_model
+    lower_model : object
         Quantile regressor trained at quantile level ``alpha / 2``.
         Must expose a sklearn-compatible ``fit(X, y)`` / ``predict(X)``
-        interface.  Example::
+        interface. Example:
 
-            GradientBoostingRegressor(loss="quantile", alpha=0.05)
+        ```python
+        GradientBoostingRegressor(loss="quantile", alpha=0.05)
+        ```
 
-    upper_model
+    upper_model : object
         Quantile regressor trained at quantile level ``1 - alpha / 2``.
-        Example::
+        Example:
 
-            GradientBoostingRegressor(loss="quantile", alpha=0.95)
+        ```python
+        GradientBoostingRegressor(loss="quantile", alpha=0.95)
+        ```
 
     rearrange : bool, default=False
         Sort the two quantile predictions before calibrating and predicting
@@ -79,10 +83,20 @@ class CQRConformalPredictor(BaseEstimator):
 
         Parameters
         ----------
-        X_train, y_train
-            Training data.
-        X_calib, y_calib
-            Calibration data used to compute nonconformity scores.
+        X_train : array-like of shape (n_train, n_features)
+            Features used to fit both quantile regressors.
+        y_train : array-like of shape (n_train,)
+            Training target values.
+        X_calib : array-like of shape (n_calib, n_features)
+            Held-out calibration features with the same columns as `X_train`.
+        y_calib : array-like of shape (n_calib,)
+            Finite calibration target values used to compute nonconformity
+            scores from the two fitted quantile regressors.
+
+        Returns
+        -------
+        self : CQRConformalPredictor
+            The fitted and calibrated predictor.
         """
 
         self._scores = None
@@ -114,14 +128,26 @@ class CQRConformalPredictor(BaseEstimator):
 
         Parameters
         ----------
-        X : np.ndarray
-        confidence : float
-            Desired marginal coverage level.
+        X : array-like of shape (n_samples, n_features)
+            Features for which to generate intervals, in training column order.
+        confidence : float, default=0.9
+            Desired marginal coverage level, strictly between 0 and 1.
 
         Returns
         -------
-        lower : np.ndarray
-        upper : np.ndarray
+        lower : numpy.ndarray of shape (n_samples,)
+            Lower interval endpoints after the calibration correction.
+        upper : numpy.ndarray of shape (n_samples,)
+            Upper interval endpoints after the calibration correction.
+
+        Notes
+        -----
+        The correction uses the `ceil((n_calib + 1) * confidence)`-th smallest
+        calibration score. If this rank exceeds `n_calib`, the intervals are
+        unbounded with endpoints `(-inf, inf)`. A negative correction or
+        crossing quantiles can produce an empty set with `lower > upper`;
+        these endpoints are preserved and `upper - lower` is then a signed
+        span, not the nonnegative length of the empty set.
         """
 
         if self._scores is None:
