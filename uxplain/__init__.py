@@ -11,6 +11,8 @@ from uxplain.conformal.crepes_predictor import (
     ConformalMethod,
     CrepesConformalPredictor,
 )
+from uxplain.evaluation import coverage_table, importance_table
+from uxplain.explainability.base import ShapExplanation, UncertaintyExplanation
 from uxplain.explainability.lime_explainer import (
     LIMEExplanation,
     LimeUncertaintyExplainer,
@@ -23,6 +25,7 @@ from uxplain.explainability.shap_explainer import ShapUncertaintyExplainer
 from uxplain.plotting import (
     STYLE,
     ice_curves,
+    importance_bar,
     lime_local,
     pdp_curve,
     pdp_importance,
@@ -65,12 +68,17 @@ __all__ = [
     "PDPExplanation",
     "PDPUncertaintyExplainer",
     "RegressionMetric",
+    "ShapExplanation",
     "ShapUncertaintyExplainer",
     "UncertaintyExplainerProtocol",
+    "UncertaintyExplanation",
     "UncertaintyExplanationPipeline",
     "UncertaintyMetric",
     "__version__",
+    "coverage_table",
     "ice_curves",
+    "importance_bar",
+    "importance_table",
     "lime_local",
     "pdp_curve",
     "pdp_importance",

@@ -1,7 +1,7 @@
 """
 Plotting primitives for uncertainty explanations.
 
-Every figure in \\pkg{uxplain} is drawn here with plain \\pkg{matplotlib} from the
+Every figure in uxplain is drawn here with plain matplotlib from the
 raw arrays produced by the explainers — SHAP values, partial-dependence grids,
 LIME coefficients. Nothing is delegated to the plotting layers of ``shap``,
 ``sklearn.inspection`` or ``lime``, so the caller owns every artist.
@@ -35,6 +35,7 @@ from .uncertainty.metrics import metric_label
 __all__ = [
     "STYLE",
     "ice_curves",
+    "importance_bar",
     "lime_local",
     "pdp_curve",
     "pdp_importance",
@@ -260,6 +261,23 @@ def _validate_max_display(max_display):
         raise ValueError("max_display must be a positive integer or None.")
 
 
+def _decimals(values) -> int:
+    """Decimals that show the largest magnitude with three significant digits."""
+    values = np.abs(np.asarray(values, dtype=float))
+    values = values[np.isfinite(values) & (values > 0)]
+    if not len(values):
+        return 2
+    return int(np.clip(2 - np.floor(np.log10(values.max())), 0, 6))
+
+
+def _format_number(value: float) -> str:
+    """Compact label for a feature value: no scientific notation below 1e9."""
+    value = float(value)
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:.3g}"
+
+
 def _sign_colors(values, style: dict) -> list[str]:
     """Colour signed marks, spending the contrasting hue only when it earns it.
 
@@ -321,7 +339,7 @@ def shap_bar(
     ax.set_yticklabels([names[i] for i in order])
 
     if show_values:
-        ax.bar_label(bars, fmt="%.2f", padding=5,
+        ax.bar_label(bars, fmt=f"%.{_decimals(importance)}f", padding=5,
                      fontsize=style["annotation_size"],
                      color=style["label_color"])
         ax.set_xlim(0, max(importance[order].max() * 1.18, 1e-9))
@@ -330,6 +348,61 @@ def shap_bar(
             title=title if title is not None
             else f"Mean absolute contribution to {_metric_text(explanation, metric).lower()}",
             xlabel="mean(|SHAP value|)")
+    fig.tight_layout()
+    return ax
+
+
+def importance_bar(
+    table,
+    ax=None,
+    max_display: int | None = None,
+    figsize: tuple[float, float] = (9, 5),
+    show_values: bool = True,
+    xlabel: str = "Importance",
+    title: str | None = None,
+    **style_overrides,
+):
+    """Global importance table as a horizontal bar chart.
+
+    Parameters
+    ----------
+    table
+        A table from :func:`uxplain.evaluation.importance_table` (or a result's
+        ``importance()``): indexed by feature, with an ``importance`` column and
+        optionally ``ci_lower`` / ``ci_upper``, which are drawn as intervals.
+    max_display
+        Keep only this many highest-ranked features.
+    """
+    style = _style(style_overrides)
+    importance = np.asarray(table["importance"], dtype=float)
+    names = [str(name) for name in table.index]
+    order = _top_features(importance, max_display)
+
+    fig, ax, _ = _new_ax(ax, figsize)
+    y = np.arange(len(order))
+    ax.barh(y, importance[order], color=style["magnitude_color"],
+            edgecolor=style["bar_edge_color"],
+            height=style["bar_height"], zorder=3)
+    upper_end = importance[order]
+    if "ci_lower" in table and "ci_upper" in table:
+        lower = np.asarray(table["ci_lower"], dtype=float)[order]
+        upper = np.asarray(table["ci_upper"], dtype=float)[order]
+        ax.errorbar(importance[order], y,
+                    xerr=[importance[order] - lower, upper - importance[order]],
+                    fmt="none", ecolor=style["title_color"], elinewidth=1.1,
+                    capsize=3, zorder=4)
+        upper_end = upper
+    ax.set_yticks(y)
+    ax.set_yticklabels([names[i] for i in order])
+
+    if show_values:
+        decimals = _decimals(importance)
+        for yi, (end, value) in enumerate(zip(upper_end, importance[order])):
+            ax.text(end, yi, f"  {value:.{decimals}f}", va="center", ha="left",
+                    fontsize=style["annotation_size"], color=style["label_color"])
+    ax.set_xlim(0, max(np.max(upper_end) * 1.22, 1e-9))
+
+    _finish(ax, style, title=title or "", xlabel=xlabel)
     fig.tight_layout()
     return ax
 
@@ -482,7 +555,7 @@ def shap_waterfall(
     for feat in shown:
         label = names[feat]
         if row is not None:
-            label = f"{row[feat]:.3g} = {label}"
+            label = f"{_format_number(row[feat])} = {label}"
         labels.append(label)
         contribs.append(phi[feat])
     if len(hidden):
@@ -505,9 +578,10 @@ def shap_waterfall(
 
     span = max(np.abs(contribs).max(), abs(total - base_value), 1e-9)
     pad = 0.02 * span
+    decimals = _decimals([*contribs, base_value, total])
     for yi, (start, c) in enumerate(zip(starts, contribs)):
         tip = start + c
-        ax.text(tip + (pad if c >= 0 else -pad), yi, f"{c:+.2f}",
+        ax.text(tip + (pad if c >= 0 else -pad), yi, f"{c:+.{decimals}f}",
                 va="center", ha="left" if c >= 0 else "right",
                 fontsize=style["annotation_size"], color=style["label_color"])
 
@@ -528,10 +602,10 @@ def shap_waterfall(
             xlabel=metric_txt)
 
     label_y = header - 0.25
-    ax.text(base_value, label_y, f"$E[f(X)]$ = {base_value:.2f}",
+    ax.text(base_value, label_y, f"$E[f(X)]$ = {base_value:.{decimals}f}",
             ha="center", va="center", fontsize=style["annotation_size"],
             color=style["tick_color"])
-    ax.text(total, label_y, f"$f(x)$ = {total:.2f}",
+    ax.text(total, label_y, f"$f(x)$ = {total:.{decimals}f}",
             ha="center", va="center", fontsize=style["annotation_size"],
             color=style["title_color"])
 
