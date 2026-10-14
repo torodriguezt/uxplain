@@ -27,13 +27,26 @@ pipeline = UncertaintyExplanationPipeline(
     random_state=42,
 )
 pipeline.fit(X_train, y_train)
+print(pipeline.summary())
+print(pipeline.evaluate(X_test, y_test))
 result = pipeline.explain(X_test[:5], show_plots=False)
+print(result.feature_importance())
 ```
 
 See [Getting started](getting-started.md) for runnable examples, calibration,
-classification, development and release checks. The
+classification with `predict_p()`, development and release checks.
+[Extending](extending.md) shows how to connect a custom backend, including MAPIE.
+The [API reference](api.md) documents the public classes, methods and functions
+directly from their docstrings. The
 [notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks) cover the
 explainability backends and plots.
+
+`evaluate()` measures empirical coverage and prediction size on labelled data;
+`feature_importance()` describes which features drive the selected uncertainty
+summary. Conformal coverage relies on the method's assumptions and does not
+extend to the explanations. Read the
+[statistical scope and limitations](getting-started.md#statistical-scope-and-limitations)
+before interpreting these outputs.
 
 ## Links
 
