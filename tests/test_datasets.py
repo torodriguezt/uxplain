@@ -1,9 +1,12 @@
 """Data-loader checks use tiny local extracts, never remote survey downloads."""
 
+import hashlib
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from uxplain import datasets
 from uxplain.datasets import fetch_pnadc, load_geih
 
 
@@ -37,13 +40,120 @@ def test_geih_alternative_targets_are_not_predictors(tmp_path, target):
 
 def test_pnadc_informality_target_is_not_predictor(monkeypatch):
     frame = pd.DataFrame({
-        "age": [30], "hours": [40], "education": [4], "sex": [1],
-        "race": [1], "urban": [1], "informal": [True],
+        "age": [30], "hours": [40], "education": [4], "female": [0.],
+        "black_or_brown": [1.], "urban": [1.], "informal": [1.],
     })
-    monkeypatch.setattr("uxplain.datasets._pnadc_frame", lambda *args: frame)
+    monkeypatch.setattr("uxplain.datasets._pnadc_frame", lambda *args: (frame, {}))
     result = fetch_pnadc(target="informal")
     assert "informal" not in result.feature_names
-    assert result.target.tolist() == [True]
+    assert result.target.tolist() == [1.]
+
+
+def _pnadc_raw():
+    return pd.DataFrame({
+        "psu": ["110000016", "110000016", "110000017"],
+        "dwelling": ["01", "01", "02"],
+        "panel": ["07", "07", "07"],
+        "urban_code": ["1", "2", "1"],
+        "sex": ["2", "1", "1"],
+        "age": ["30", "41", "52"],
+        "race": ["4", "9", "1"],
+        "education": ["7", "3", "8"],
+        "employed": ["1", "1", "1"],
+        "occupation": ["0110", "2421", " "],
+        "pension_contrib": ["2", "1", None],
+        "income": ["1500", "3200", "2000"],
+        "hours": ["40", "44", "30"],
+        "weight": ["100.5", "98.2", "120.0"],
+    })
+
+
+def test_pnadc_codes_become_indicators():
+    frame = datasets._recode_pnadc(_pnadc_raw())
+    np.testing.assert_array_equal(frame.female, [1., 0., 0.])
+    # Race 9 ("ignored") is missing, not a category with a magnitude.
+    np.testing.assert_array_equal(frame.black_or_brown, [1., np.nan, 0.])
+    np.testing.assert_array_equal(frame.urban, [1., 0., 1.])
+    np.testing.assert_array_equal(frame.informal, [1., 0., np.nan])
+    # Education outside the documented 1-7 range is missing.
+    np.testing.assert_array_equal(frame.education, [7., 3., np.nan])
+    assert frame.occupation_group.tolist()[:2] == ["Armed forces", "Professionals"]
+    assert pd.isna(frame.occupation_group.iloc[2])
+    assert frame.household.tolist() == [
+        "110000016-01-07", "110000016-01-07", "110000017-02-07",
+    ]
+
+
+def test_geih_codes_become_indicators(tmp_path):
+    frame = _geih_rows()
+    frame["P6920"] = ["1", "2", "3"]
+    frame["P3042"] = ["4", "99", "13"]
+    result = load_geih(_write(frame, tmp_path), features=["age", "female", "education"])
+    np.testing.assert_array_equal(result.frame.female, [0., 0.])
+    np.testing.assert_array_equal(result.frame.education, [4., 13.])
+    # Workers who already receive a pension have no contribution status.
+    assert result.frame.informal.isna().tolist() == [False, True]
+
+
+def test_groups_and_provenance(tmp_path):
+    path = _write(_geih_rows(), tmp_path)
+    result = load_geih(path)
+    assert result.groups.tolist() == ["1-1", "1-1", "2-1"]
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert result.provenance == {"files": {path.name: expected}}
+
+
+def test_one_per_household_keeps_a_single_member(tmp_path):
+    path = _write(_geih_rows(), tmp_path)
+    result = load_geih(path, one_per_household=True, random_state=3)
+    assert sorted(result.groups.tolist()) == ["1-1", "2-1"]
+    again = load_geih(path, one_per_household=True, random_state=3)
+    pd.testing.assert_frame_equal(result.frame, again.frame)
+
+
+def test_one_per_household_requires_household_keys(tmp_path):
+    frame = _geih_rows().drop(columns=["DIRECTORIO", "SECUENCIA_P", "ORDEN"])
+    with pytest.raises(ValueError, match="household identifiers"):
+        load_geih(_write(frame, tmp_path), one_per_household=True)
+
+
+def _no_network(*args, **kwargs):
+    raise AssertionError("network access attempted")
+
+
+def test_pnadc_legacy_cache_is_accepted_when_checksum_matches(tmp_path, monkeypatch):
+    monkeypatch.setattr(datasets, "_download", _no_network)
+    monkeypatch.setattr(datasets, "_latest_quarter_archive", _no_network)
+    legacy = tmp_path / "pnadc_2024q1.zip"
+    legacy.write_bytes(b"quarter")
+    digest = hashlib.sha256(b"quarter").hexdigest()
+    path, release, found = datasets._pnadc_archive(
+        2024, 1, tmp_path, "PNADC_012024_20250815.zip", digest,
+    )
+    assert (path, release, found) == (legacy, "PNADC_012024_20250815.zip", digest)
+
+
+def test_pnadc_legacy_cache_without_release_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(datasets, "_download", _no_network)
+    monkeypatch.setattr(datasets, "_latest_quarter_archive", _no_network)
+    legacy = tmp_path / "pnadc_2024q1.zip"
+    legacy.write_bytes(b"quarter")
+    path, release, _ = datasets._pnadc_archive(2024, 1, tmp_path)
+    assert path == legacy and release is None
+
+
+def test_pnadc_checksum_mismatch_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(datasets, "_download", _no_network)
+    (tmp_path / "PNADC_012024_20250815.zip").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        datasets._pnadc_archive(
+            2024, 1, tmp_path, "PNADC_012024_20250815.zip", "0" * 64,
+        )
+
+
+def test_pnadc_archive_name_must_match_quarter(tmp_path):
+    with pytest.raises(ValueError, match="archive must be"):
+        datasets._pnadc_archive(2024, 1, tmp_path, "PNADC_022024_20250815.zip")
 
 
 def test_explicit_target_leakage_is_rejected(tmp_path):

@@ -93,7 +93,7 @@ class TestPipelineMetric:
             model=Ridge(), xai_method="shap", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer.metric == metric
+        assert pipeline.explainer_.metric == metric
         # Smoke-test that explain() runs end-to-end with the chosen metric
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert result.explanation_values.values.shape[0] == 5
@@ -104,7 +104,7 @@ class TestPipelineMetric:
             model=Ridge(), xai_method="pdp", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer.metric == metric
+        assert pipeline.explainer_.metric == metric
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert result.explanation_values.metric == metric
 
@@ -117,14 +117,16 @@ class TestPipelineMetric:
             n_lime_samples=50,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer.metric == metric
+        assert pipeline.explainer_.metric == metric
         result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert result.explanation_values.metric == metric
 
     def test_default_metric_is_width(self, data):
         pipeline = UncertaintyExplanationPipeline(model=Ridge())
-        assert pipeline.uncertainty_metric == "width"
-        assert pipeline.explainer.metric == "width"
+        assert pipeline.uncertainty_metric is None  # the parameter is stored as given
+        pipeline.fit(data["X_train"], data["y_train"])
+        assert pipeline.uncertainty_metric_ == "width"
+        assert pipeline.explainer_.metric == "width"
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +272,8 @@ class TestClassificationPipelineMetric:
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
         )
-        assert pipeline.uncertainty_metric == metric
-        assert pipeline.explainer.metric == metric
+        assert pipeline.uncertainty_metric_ == metric
+        assert pipeline.explainer_.metric == metric
         result = pipeline.explain(
             classification_data["X_test"][:5], show_plots=False,
         )
@@ -283,8 +285,9 @@ class TestClassificationPipelineMetric:
         pipeline = UncertaintyExplanationPipeline(
             model=classifier, task="classification",
         )
-        assert pipeline.uncertainty_metric == "set_size"
-        assert pipeline.explainer.metric == "set_size"
+        pipeline.fit(classification_data["X_train"], classification_data["y_train"])
+        assert pipeline.uncertainty_metric_ == "set_size"
+        assert pipeline.explainer_.metric == "set_size"
 
     def test_invalid_classification_metric_raises(self, classifier):
         with pytest.raises(ValueError, match="not valid for classification"):
