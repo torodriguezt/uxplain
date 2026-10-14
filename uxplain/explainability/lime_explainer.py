@@ -56,7 +56,7 @@ class LIMEExplanation(UncertaintyExplanation):
     def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
         """The local coefficient plot (``kind="local"``) for ``sample_index``.
 
-        Keyword arguments are passed to :func:`uxplain.plots.generate_lime_plots`.
+        Keyword arguments are passed to `uxplain.plots.generate_lime_plots`.
         """
         from ..plots import generate_lime_plots
 
@@ -92,6 +92,8 @@ class LimeUncertaintyExplainer(BaseEstimator):
             Fitted conformal predictor.
 
         confidence : float
+            Nominal coverage in ``(0, 1)`` used to construct the explained
+            intervals or prediction sets.
 
         n_lime_samples : int
             Number of perturbed samples LIME generates per explained
@@ -105,8 +107,10 @@ class LimeUncertaintyExplainer(BaseEstimator):
             Seed for LIME's perturbation sampling. Set for
             reproducible coefficients across runs.
 
-        metric : {"width", "lower", "upper", "midpoint"}
-            Which scalar function of ``(lower, upper)`` to explain.
+        metric : str
+            Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
+            ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
+            or ``"confidence"`` for classification.
         """
 
         self.cp = cp
@@ -133,6 +137,13 @@ class LimeUncertaintyExplainer(BaseEstimator):
         X_background : np.ndarray
             Training / background data used to infer feature
             distributions for perturbation.
+        **_
+            Additional keyword arguments are accepted and ignored.
+
+        Returns
+        -------
+        None
+            Initializes the perturbation model and the scalar target function.
         """
 
         X_background = np.asarray(X_background)

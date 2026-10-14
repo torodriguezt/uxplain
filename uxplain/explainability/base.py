@@ -1,16 +1,15 @@
 """
 Common interface of the explanations returned by uxplain's explainers.
 
-Every explainer returns a subclass of :class:`UncertaintyExplanation`:
-:class:`ShapExplanation`, :class:`~uxplain.LIMEExplanation` or
-:class:`~uxplain.PDPExplanation`. They share
+Every explainer returns a subclass of `UncertaintyExplanation`:
+`ShapExplanation`, `LIMEExplanation` or `PDPExplanation`. They share
 
 - ``method``: ``"shap"``, ``"lime"`` or ``"pdp"``;
 - ``metric``: the explained conformal summary, e.g. ``"width"``;
 - ``feature_names``;
-- :meth:`~UncertaintyExplanation.feature_importance`, a global ranking;
-- :meth:`~UncertaintyExplanation.to_frame`, the attributions as a table;
-- :meth:`~UncertaintyExplanation.plot`, the method's standard figures.
+- `feature_importance`, a global ranking;
+- `to_frame`, the attributions as a table;
+- `plot`, the method's standard figures.
 """
 
 from __future__ import annotations
@@ -42,8 +41,26 @@ class UncertaintyExplanation:
 
         SHAP and LIME use the mean absolute attribution over the explained
         rows; partial dependence uses the standard deviation of the averaged
-        curve. See :func:`uxplain.evaluation.importance_table` for the
-        bootstrap options and the columns of the result.
+        curve.
+
+        Parameters
+        ----------
+        n_boot : int, default=0
+            Number of bootstrap resamples of explained rows. For partial
+            dependence, requires ICE curves from ``explain(..., kind="both")``.
+            Intervals describe variability over these rows only, excluding
+            model refitting or redrawing calibration data.
+        level : float, default=0.95
+            Coverage of bootstrap percentile intervals, between zero and one.
+        random_state : int, optional
+            Seed for bootstrap sampling.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Features sorted by decreasing ``importance``, with columns
+            ``importance`` and ``rank``. When ``n_boot > 0``, also includes
+            ``ci_lower``, ``ci_upper``, ``rank_lower`` and ``rank_upper``.
         """
         from ..evaluation import importance_table
 
@@ -51,11 +68,36 @@ class UncertaintyExplanation:
                                 random_state=random_state)
 
     def to_frame(self) -> pd.DataFrame:
-        """The explanation as a table; see each subclass for its layout."""
+        """Return the explanation as a table.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Method-specific values: attributions for SHAP, local coefficients
+            for LIME, or grid values and averaged curves for partial dependence.
+            See each subclass for its column layout.
+        """
         raise NotImplementedError
 
     def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
-        """Draw the method's standard figures; returns ``{kind: figure}``."""
+        """Draw the method's standard figures.
+
+        Parameters
+        ----------
+        kind : str or list of str, optional
+            Plot kinds supported by the concrete explanation. ``None`` selects
+            the method's default figures.
+        show : bool, default=True
+            Display the figures. Set to ``False`` to save or style them first.
+        **kwargs : dict
+            Options forwarded to the method's figure builder, such as
+            ``figsize`` or a sample index for a local explanation.
+
+        Returns
+        -------
+        dict
+            Mapping from plot kind to ``matplotlib.figure.Figure``.
+        """
         raise NotImplementedError
 
     def _describe(self) -> str:
@@ -86,6 +128,7 @@ class ShapExplanation(UncertaintyExplanation):
     data : np.ndarray of shape (n_samples, n_features), optional
         Feature values of the explained rows.
     feature_names : list of str, optional
+        Names of the columns in ``values`` and ``data``.
     metric : str
         The explained summary, e.g. ``"width"`` or ``"set_size"``.
     algorithm : str, optional
@@ -106,7 +149,14 @@ class ShapExplanation(UncertaintyExplanation):
         return len(np.atleast_2d(self.values))
 
     def to_frame(self) -> pd.DataFrame:
-        """One row per explained observation: the attributions and the base value."""
+        """Return one row per explained observation.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One attribution column per feature, followed by ``base_value``.
+            Unnamed features are labelled ``Feature 0``, ``Feature 1``, etc.
+        """
         values = np.atleast_2d(np.asarray(self.values, dtype=float))
         frame = pd.DataFrame(values, columns=_feature_labels(self.feature_names,
                                                              values.shape[1]))
@@ -115,7 +165,13 @@ class ShapExplanation(UncertaintyExplanation):
         return frame
 
     def to_shap(self):
-        """The same values as a :class:`shap.Explanation`, for SHAP's own plots."""
+        """Convert to the object accepted by SHAP's own plotting functions.
+
+        Returns
+        -------
+        shap.Explanation
+            The same attributions, base values, data and feature names.
+        """
         import shap
 
         return shap.Explanation(values=np.asarray(self.values),
@@ -126,7 +182,21 @@ class ShapExplanation(UncertaintyExplanation):
     def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
         """SHAP figures: ``"bar"``, ``"beeswarm"`` and ``"waterfall"``.
 
-        Keyword arguments are passed to :func:`uxplain.plots.generate_shap_plots`.
+        Parameters
+        ----------
+        kind : str or list of str, optional
+            Any of ``"bar"``, ``"beeswarm"``, ``"waterfall"`` or ``"summary"``
+            (an alias of ``"beeswarm"``). Defaults to the first three kinds.
+        show : bool, default=True
+            Display the figures. Set to ``False`` to save or style them first.
+        **kwargs : dict
+            Options for ``uxplain.plots.generate_shap_plots``, including
+            ``waterfall_index``, ``max_display`` and ``figsize``.
+
+        Returns
+        -------
+        dict
+            Mapping from plot kind to ``matplotlib.figure.Figure``.
         """
         from ..plots import generate_shap_plots
 
