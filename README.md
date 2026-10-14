@@ -1,11 +1,11 @@
 # uxplain
 
-**Why is your model uncertain about *this* prediction?**
+Explainability for conformal prediction uncertainty.
 
-Conformal prediction tells you *how* uncertain a model is — a prediction interval for
-regression, a prediction set for classification. `uxplain` goes one step further: it turns that
-uncertainty into a number and explains it with SHAP, PDP, or LIME, so you also learn **which
-features drive it**.
+`uxplain` fits a split-conformal predictor on any scikit-learn estimator, reduces its output to a
+scalar uncertainty summary *u(x)*, and attributes *u(x)* to the input features with SHAP, PDP/ICE
+or LIME. The result tells you which features make the model more or less uncertain, not just
+which ones drive its predictions.
 
 - **Conformal backends:** [crepes](https://github.com/henrikbostrom/crepes) (standard,
   normalized, Mondrian) and conformalized quantile regression (CQR) for regression; crepes
