@@ -28,7 +28,7 @@ class ConformalPredictorProtocol(Protocol):
     in) and accept arbitrary feature combinations: SHAP and partial dependence
     evaluate it on rows that mix observed and background values. The pipeline
     clones the predictor before fitting it, so give it ``get_params`` (e.g. by
-    inheriting from :class:`sklearn.base.BaseEstimator`) or make it
+    inheriting from `sklearn.base.BaseEstimator`) or make it
     deep-copyable.
     """
 
@@ -38,13 +38,51 @@ class ConformalPredictorProtocol(Protocol):
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the model and calibrate prediction intervals on separate data.
+
+        Parameters
+        ----------
+        X_train : np.ndarray of shape (n_train, n_features)
+            Features used to train the underlying model.
+        y_train : np.ndarray of shape (n_train,)
+            Training responses.
+        X_calib : np.ndarray of shape (n_calib, n_features)
+            Held-out calibration features in the same column order.
+        y_calib : np.ndarray of shape (n_calib,)
+            Calibration responses.
+
+        Returns
+        -------
+        object
+            Backend-defined return value, conventionally the fitted predictor.
+            The pipeline uses the fitted instance and ignores this return value.
+        """
+        ...
 
     def predict(
         self,
         X: np.ndarray,
         confidence: float = 0.9,
-    ) -> tuple[np.ndarray, np.ndarray]: ...
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return conformal interval endpoints for each observation.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Features in the training column order.
+        confidence : float, default=0.9
+            Nominal coverage level, strictly between zero and one.
+
+        Returns
+        -------
+        lower : np.ndarray of shape (n_samples,)
+            Lower endpoints.
+        upper : np.ndarray of shape (n_samples,)
+            Upper endpoints. Preserve signed endpoints when the conformal
+            method permits empty sets with ``upper < lower``.
+        """
+        ...
 
 
 class ConformalClassifierProtocol(Protocol):
@@ -53,7 +91,12 @@ class ConformalClassifierProtocol(Protocol):
     Implementations must expose ``predict_set``, ``predict_p``,
     and a ``classes_`` attribute aligned with the model's class order.
     The same determinism and cloning requirements as for
-    :class:`ConformalPredictorProtocol` apply.
+    `ConformalPredictorProtocol` apply.
+
+    Attributes
+    ----------
+    classes_ : np.ndarray of shape (n_classes,)
+        Labels in the column order returned by ``predict_set`` and ``predict_p``.
     """
 
     classes_: np.ndarray
@@ -64,21 +107,66 @@ class ConformalClassifierProtocol(Protocol):
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the classifier and calibrate prediction sets on separate data.
+
+        Parameters
+        ----------
+        X_train : np.ndarray of shape (n_train, n_features)
+            Training features.
+        y_train : np.ndarray of shape (n_train,)
+            Training class labels.
+        X_calib : np.ndarray of shape (n_calib, n_features)
+            Held-out calibration features in the same column order.
+        y_calib : np.ndarray of shape (n_calib,)
+            Calibration class labels.
+
+        Returns
+        -------
+        object
+            Backend-defined return value, conventionally the fitted predictor.
+            The pipeline ignores this value; fitting must populate ``classes_``.
+        """
+        ...
 
     def predict_set(
         self,
         X: np.ndarray,
         confidence: float = 0.9,
     ) -> np.ndarray:
-        """Return bool array of shape (n_samples, n_classes)."""
+        """Return membership of each candidate label in the prediction set.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Features in the training column order.
+        confidence : float, default=0.9
+            Nominal coverage level, strictly between zero and one.
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_classes), dtype=bool
+            Whether each label is included, with columns ordered as ``classes_``.
+        """
         ...
 
     def predict_p(
         self,
         X: np.ndarray,
     ) -> np.ndarray:
-        """Return p-value array of shape (n_samples, n_classes)."""
+        """Return conformal p-values for each candidate label.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Features in the training column order.
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_classes)
+            Conformal p-values in the column order of ``classes_``. These
+            measure conformity of candidate labels, not class probabilities.
+        """
         ...
 
 
@@ -86,9 +174,9 @@ class UncertaintyExplainerProtocol(Protocol):
     """Interface for uncertainty explainers.
 
     ``fit`` receives the background data (keyword arguments of
-    :meth:`~uxplain.UncertaintyExplanationPipeline.explain` are forwarded to
+    `UncertaintyExplanationPipeline.explain` are forwarded to
     it); ``explain`` returns the explanation of the rows ``X``. Return a
-    subclass of :class:`~uxplain.UncertaintyExplanation` so that the result's
+    subclass of `UncertaintyExplanation` so that the result's
     ``feature_importance()`` and ``plot()`` work. If the explainer has a ``cp``
     attribute, the pipeline points it to its fitted conformal predictor.
     """
@@ -97,9 +185,38 @@ class UncertaintyExplainerProtocol(Protocol):
         self,
         X_background: np.ndarray,
         **kwargs,
-    ) -> None: ...
+    ) -> None:
+        """Prepare the explainer using background observations.
+
+        Parameters
+        ----------
+        X_background : np.ndarray of shape (n_background, n_features)
+            Background features supplied by the pipeline.
+        **kwargs : dict
+            Explainer-specific settings forwarded from ``pipeline.explain``.
+
+        Returns
+        -------
+        None
+            The explainer is prepared in place.
+        """
+        ...
 
     def explain(
         self,
         X: np.ndarray,
-    ) -> Any: ...
+    ) -> Any:
+        """Explain a scalar summary of conformal predictions.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Observations to explain, supplied as an array or a DataFrame.
+
+        Returns
+        -------
+        UncertaintyExplanation
+            Method-specific explanation with ``feature_importance``,
+            ``to_frame`` and ``plot`` accessors.
+        """
+        ...

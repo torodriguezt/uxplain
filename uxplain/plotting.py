@@ -10,14 +10,19 @@ Each primitive follows the same contract:
 
 - it accepts an existing ``ax`` (and draws into it) or creates its own figure,
 - it returns the ``Axes`` it drew on,
-- it takes styling from :data:`STYLE`, which can be mutated globally or
+- it takes styling from `STYLE`, which can be mutated globally or
   overridden per call.
 
-That makes the primitives composable::
+That makes the primitives composable:
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    shap_bar(explanation, ax=axes[0])
-    shap_beeswarm(explanation, ax=axes[1])
+```python
+import matplotlib.pyplot as plt
+from uxplain import shap_bar, shap_beeswarm
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+shap_bar(explanation, ax=axes[0])
+shap_beeswarm(explanation, ax=axes[1])
+```
 """
 
 from __future__ import annotations
@@ -48,7 +53,7 @@ __all__ = [
 
 
 #: Global styling. Mutate to restyle every figure at once, or pass the same
-#: keys per call to override a single plot. See :func:`use_theme` for the
+#: keys per call to override a single plot. See `use_theme` for the
 #: bundled presets.
 STYLE: dict[str, Any] = {
     # --- data ink -----------------------------------------------------------
@@ -92,7 +97,7 @@ STYLE: dict[str, Any] = {
 }
 
 
-#: Bundled presets, applied with :func:`use_theme`.
+#: Bundled presets, applied with `use_theme`.
 THEMES: dict[str, dict[str, Any]] = {
     # Austere and print-first: no hue at all, so the figure survives grayscale
     # reproduction. Opposing marks take a lighter step of the same gray.
@@ -128,20 +133,20 @@ THEMES: dict[str, dict[str, Any]] = {
 
 
 def use_theme(name: str, **overrides) -> dict:
-    """Apply a bundled theme to :data:`STYLE` in place.
+    """Apply a bundled theme to `STYLE` in place.
 
     Parameters
     ----------
     name : {"mono", "diverging", "editorial"}
         Preset to apply. ``"mono"`` is grayscale-safe, ``"diverging"`` reserves
         hue for the sign of a contribution, ``"editorial"`` keeps a single hue.
-    **overrides
+    **overrides : object
         Extra style keys applied on top of the preset.
 
     Returns
     -------
     dict
-        The updated :data:`STYLE`, so it can be inspected or stashed.
+        The updated global `STYLE` dictionary, returned by reference.
     """
     if name not in THEMES:
         raise ValueError(
@@ -312,14 +317,34 @@ def shap_bar(
 
     Parameters
     ----------
-    explanation
-        Object exposing ``.values`` of shape ``(n_samples, n_features)``.
-    ax
-        Draw into this ``Axes`` when given; otherwise a new figure is made.
-    max_display
-        Keep only the this many highest-ranked features.
-    show_values
+    explanation : ShapExplanation or shap.Explanation
+        Object exposing finite `values` of shape `(n_samples, n_features)`
+        or `(n_features,)` for a single row.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_names : sequence of str, optional
+        One label per feature. Defaults to the explanation's feature names,
+        or `Feature 0`, `Feature 1`, and so on when none are available.
+    max_display : int, optional
+        Positive number of highest-ranked features to display. `None` shows
+        all features. Omitted features are not aggregated into another bar.
+    figsize : tuple of float, default=(9, 5)
+        Figure width and height in inches, used only when creating a figure.
+    show_values : bool, default=True
         Annotate each bar with its numeric value.
+    metric : str, optional
+        Uncertainty metric used for the title. Defaults to the explanation's
+        metric, or `"width"` if it has no metric attribute.
+    title : str, optional
+        Title override. `None` generates a title from the metric; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, such as `magnitude_color` or
+        `annotation_size`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the chart, with the largest importance at the top.
     """
     style = _style(style_overrides)
     values, _, _ = _unpack_shap(explanation)
@@ -366,12 +391,32 @@ def importance_bar(
 
     Parameters
     ----------
-    table
-        A table from :func:`uxplain.evaluation.importance_table` (or a result's
-        ``importance()``): indexed by feature, with an ``importance`` column and
-        optionally ``ci_lower`` / ``ci_upper``, which are drawn as intervals.
-    max_display
-        Keep only this many highest-ranked features.
+    table : pandas.DataFrame
+        Nonempty table from `uxplain.evaluation.importance_table` or a result's
+        `feature_importance()`, indexed by feature with an `importance` column.
+        If both `ci_lower` and `ci_upper` are present, they are drawn as error
+        bars and must bracket the corresponding importance estimate.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    max_display : int, optional
+        Positive number of features with the largest importance to display.
+        `None` shows all features; omitted features are not aggregated.
+    figsize : tuple of float, default=(9, 5)
+        Figure width and height in inches, used only when creating a figure.
+    show_values : bool, default=True
+        Annotate importance estimates at the bar ends, or beyond the upper
+        error-bar endpoints when interval columns are present.
+    xlabel : str, default="Importance"
+        Horizontal-axis label.
+    title : str, optional
+        Plot title. No title is added when omitted or empty.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the chart, with the largest importance at the top.
     """
     style = _style(style_overrides)
     importance = np.asarray(table["importance"], dtype=float)
@@ -456,6 +501,43 @@ def shap_beeswarm(
 
     Point colour encodes the feature's own value, so the plot shows both how
     much a feature moves the metric and in which direction high/low values push.
+
+    Parameters
+    ----------
+    explanation : ShapExplanation or shap.Explanation
+        Object exposing finite `values` of shape `(n_samples, n_features)`
+        or `(n_features,)` for a single row. Its optional `data` supplies
+        feature values for colouring when `X` is not provided.
+    X : array-like, optional
+        Feature values with the same shape as the SHAP values. Overrides
+        `explanation.data`. Colours are scaled separately for each feature
+        using its 5th and 95th percentiles. Without feature data, all points
+        use the same colour.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_names : sequence of str, optional
+        One label per feature. Defaults to the explanation's names or numbered
+        labels starting at `Feature 0`.
+    max_display : int, optional
+        Positive number of features with the largest mean absolute SHAP value
+        to display. `None` shows all features; omitted features are not pooled.
+    figsize : tuple of float, default=(9, 5)
+        Figure width and height in inches, used only when creating a figure.
+    colorbar : bool, default=True
+        Add a low-to-high feature-value colour bar when feature data exist.
+    metric : str, optional
+        Uncertainty metric used for axis and title text. Defaults to the
+        explanation's metric, or `"width"` if it has no metric attribute.
+    title : str, optional
+        Title override. `None` generates a title from the metric; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `colormap`,
+        `point_size` and `point_alpha`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Main plot axes, excluding the optional colour-bar axes.
     """
     style = _style(style_overrides)
     values, data, _ = _unpack_shap(explanation)
@@ -532,6 +614,41 @@ def shap_waterfall(
     Bars run cumulatively from the baseline ``E[f(X)]`` to the instance's
     ``f(x)``; features are ordered by absolute contribution and any remainder is
     collapsed into a single "other features" bar.
+
+    Parameters
+    ----------
+    explanation : ShapExplanation or shap.Explanation
+        Object exposing finite SHAP `values` of shape
+        `(n_samples, n_features)` and finite `base_values` as a scalar or one
+        value per row. A one-dimensional values array represents a single row.
+        Optional `data` with the same shape adds feature values to the labels.
+    index : int, default=0
+        Row of the explanation to display.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_names : sequence of str, optional
+        One label per feature. Defaults to the explanation's names or numbered
+        labels starting at `Feature 0`.
+    max_display : int, default=10
+        Positive number of individual features to display, selected by absolute
+        contribution. If more features exist, one additional bar contains the
+        signed sum of their contributions, preserving the additive total.
+    figsize : tuple of float, default=(10, 6)
+        Figure width and height in inches, used only when creating a figure.
+    metric : str, optional
+        Uncertainty metric used for axis and title text. Defaults to the
+        explanation's metric, or `"width"` if it has no metric attribute.
+    title : str, optional
+        Title override. `None` generates a title from the metric and index;
+        `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `positive_color`,
+        `negative_color` and `adaptive_sign_color`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the contributions and annotated baseline and total.
     """
     style = _style(style_overrides)
     values, data, base = _unpack_shap(explanation)
@@ -631,7 +748,36 @@ def pdp_curve(
     label: str | None = "PDP",
     **style_overrides,
 ):
-    """Averaged partial-dependence curve for one feature."""
+    """Plot the averaged partial-dependence curve for one feature.
+
+    Parameters
+    ----------
+    grid : numpy.ndarray of shape (n_grid,)
+        Feature values at which partial dependence was evaluated.
+    values : numpy.ndarray of shape (n_grid,)
+        Average uncertainty summary at each grid value.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_name : str, default=""
+        Feature label for the horizontal axis and default title.
+    figsize : tuple of float, default=(8, 6)
+        Figure width and height in inches, used only when creating a figure.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the vertical axis and title.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    label : str, optional
+        Label attached to the plotted line, default `"PDP"`. Call `ax.legend()`
+        to display a legend; this function does not add one automatically.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, such as `pdp_color` and
+        `line_width`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the averaged curve.
+    """
     style = _style(style_overrides)
     fig, ax, _ = _new_ax(ax, figsize)
     ax.plot(grid, values, color=style["pdp_color"],
@@ -655,7 +801,36 @@ def ice_curves(
     title: str | None = None,
     **style_overrides,
 ):
-    """Individual conditional expectation curves, one per observation."""
+    """Plot individual conditional expectation curves, one per observation.
+
+    Parameters
+    ----------
+    grid : numpy.ndarray of shape (n_grid,)
+        Feature values at which the individual curves were evaluated.
+    individual : numpy.ndarray of shape (n_samples, n_grid)
+        Uncertainty summary for each observation at every grid value.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_name : str, default=""
+        Feature label for the horizontal axis and default title.
+    figsize : tuple of float, default=(8, 6)
+        Figure width and height in inches, used only when creating a figure.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the vertical axis and title.
+    max_lines : int, default=80
+        Maximum number of curves to draw. If there are more observations, a
+        reproducible subset is sampled without replacement using a fixed seed.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `ice_color`.
+        Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the selected individual curves.
+    """
     style = _style(style_overrides)
     fig, ax, _ = _new_ax(ax, figsize)
 
@@ -688,7 +863,38 @@ def pdp_with_ice(
     title: str | None = None,
     **style_overrides,
 ):
-    """ICE curves with the averaged partial-dependence curve on top."""
+    """Plot ICE curves with the averaged partial-dependence curve on top.
+
+    Parameters
+    ----------
+    grid : numpy.ndarray of shape (n_grid,)
+        Feature values shared by the average and individual curves.
+    values : numpy.ndarray of shape (n_grid,)
+        Average uncertainty summary at each grid value.
+    individual : numpy.ndarray of shape (n_samples, n_grid)
+        Uncertainty summary for each observation at every grid value.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_name : str, default=""
+        Feature label for the horizontal axis and default title.
+    figsize : tuple of float, default=(8, 6)
+        Figure width and height in inches, used only when creating a figure.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the vertical axis and title.
+    max_lines : int, default=80
+        Maximum number of individual curves, reproducibly sampled without
+        replacement if needed. The supplied average curve is not recomputed.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `ice_color`,
+        `pdp_color` and `line_width`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing both kinds of curves and a legend for the average.
+    """
     style = _style(style_overrides)
     fig, ax, _ = _new_ax(ax, figsize)
     ice_curves(grid, individual, ax=ax, feature_name=feature_name,
@@ -717,7 +923,34 @@ def pdp_importance(
     title: str | None = None,
     **style_overrides,
 ):
-    """Global PDP-based importance: the spread of each feature's PDP curve."""
+    """Plot global PDP importance: the spread of each feature's PDP curve.
+
+    Parameters
+    ----------
+    importance : sequence of float
+        Nonempty sequence with one importance value per feature, computed as
+        the standard deviation of its averaged partial-dependence curve.
+        This function plots the supplied values without recomputing them.
+    feature_names : sequence of str
+        One label per feature, in the same order as `importance`.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    figsize : tuple of float, default=(8, 5)
+        Figure width and height in inches, used only when creating a figure.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the axis and default title.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, such as `magnitude_color` and
+        `annotation_size`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Horizontal bar-chart axes, ordered with the largest importance at the
+        top and annotated with values to three decimal places.
+    """
     style = _style(style_overrides)
     imp = np.asarray(importance, dtype=float)
     order = np.argsort(imp)
@@ -753,7 +986,39 @@ def pdp_interaction(
     title: str | None = None,
     **style_overrides,
 ):
-    """Two-way partial dependence as a filled contour map."""
+    """Plot two-way partial dependence as a filled contour map.
+
+    Parameters
+    ----------
+    grid_x : numpy.ndarray of shape (n_grid_x,)
+        Grid for the first feature, shown on the horizontal axis.
+    grid_y : numpy.ndarray of shape (n_grid_y,)
+        Grid for the second feature, shown on the vertical axis.
+    values : numpy.ndarray of shape (n_grid_x, n_grid_y)
+        Averaged uncertainty summary at each feature combination. The first
+        dimension corresponds to `grid_x`; the array is transposed for plotting.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    feature_names : tuple of str, default=("", "")
+        Labels for the horizontal and vertical axes, respectively.
+    figsize : tuple of float, default=(8, 6)
+        Figure width and height in inches, used only when creating a figure.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the colour bar and title.
+    levels : int, default=14
+        Level count passed to Matplotlib's `contourf`. Ignored when a feature
+        has a one-point grid: that case uses a colour mesh instead of contours.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `colormap`.
+        Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Main plot axes, excluding the colour-bar axes.
+    """
     style = _style(style_overrides)
     fig, ax, _ = _new_ax(ax, figsize)
 
@@ -795,7 +1060,38 @@ def lime_local(
     title: str | None = None,
     **style_overrides,
 ):
-    """Local LIME surrogate coefficients for a single instance."""
+    """Plot local LIME surrogate coefficients for a single instance.
+
+    Parameters
+    ----------
+    coefficients : numpy.ndarray of shape (n_features,)
+        Signed local surrogate coefficients for one observation.
+    feature_names : sequence of str
+        One label per coefficient, in the same order as `coefficients`.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into. A new figure and axes are created when omitted.
+    figsize : tuple of float, default=(9, 5)
+        Figure width and height in inches, used only when creating a figure.
+    max_display : int, optional
+        Positive number of features with the largest absolute coefficients to
+        display. `None` shows all features; omitted coefficients are not pooled.
+    metric_name : str, default="Interval width"
+        Human-readable uncertainty summary label for the axis and default title.
+    sample_index : int, optional
+        Observation identifier appended to the default title. It does not
+        select data: `coefficients` must already contain the desired row.
+    title : str, optional
+        Title override. `None` generates a title; `""` omits it.
+    **style_overrides : object
+        Per-call overrides for keys in `STYLE`, including `positive_color`,
+        `negative_color` and `adaptive_sign_color`. Values of `None` are ignored.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Horizontal bar-chart axes with the largest absolute coefficient at
+        the top and bar directions preserving the coefficient signs.
+    """
     style = _style(style_overrides)
     coefs = np.asarray(coefficients, dtype=float)
     order = _top_features(np.abs(coefs), max_display)

@@ -70,35 +70,66 @@ class _ResultMethods:
                            random_state: int | None = None) -> pd.DataFrame:
         """Global feature importance of the explained summary.
 
-        See :meth:`uxplain.UncertaintyExplanation.feature_importance`.
+        Parameters
+        ----------
+        n_boot : int, default=0
+            Number of bootstrap resamples of explained rows. Partial dependence
+            requires ICE curves from ``explain(..., kind="both")``. Intervals
+            describe variability over these rows only, excluding model refitting
+            or redrawing calibration data.
+        level : float, default=0.95
+            Coverage of bootstrap percentile intervals, between zero and one.
+        random_state : int, optional
+            Seed for bootstrap sampling.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Features sorted by decreasing ``importance``, with ``importance``
+            and ``rank`` columns. When ``n_boot > 0``, also includes
+            ``ci_lower``, ``ci_upper``, ``rank_lower`` and ``rank_upper``.
         """
         return self.explanation_values.feature_importance(
             n_boot=n_boot, level=level, random_state=random_state,
         )
 
     def plot(self, kind=None, show: bool = True, **kwargs) -> dict:
-        """Draw the explanation's standard figures; returns ``{kind: figure}``.
+        """Draw the explanation's standard figures.
 
-        See :meth:`uxplain.UncertaintyExplanation.plot`.
+        Parameters
+        ----------
+        kind : str or list of str, optional
+            Plot kinds supported by ``explanation_values``. ``None`` selects
+            the explanation method's default figures.
+        show : bool, default=True
+            Display the figures. Set to ``False`` to save or style them first.
+        **kwargs : dict
+            Options forwarded to the explanation's figure builder, such as
+            ``figsize`` or the sample index of a local plot.
+
+        Returns
+        -------
+        dict
+            Mapping from plot kind to ``matplotlib.figure.Figure``.
         """
         return self.explanation_values.plot(kind=kind, show=show, **kwargs)
 
 
 @dataclass(repr=False)
 class ExplanationResult(_ResultMethods):
-    """Result of :meth:`UncertaintyExplanationPipeline.explain` for regression.
+    """Result of `UncertaintyExplanationPipeline.explain` for regression.
 
     Attributes
     ----------
-    lower : np.ndarray
+    lower : np.ndarray of shape (n_samples,)
         Lower prediction bounds.
-    upper : np.ndarray
+    upper : np.ndarray of shape (n_samples,)
         Upper prediction bounds.
-    interval_width : np.ndarray
+    interval_width : np.ndarray of shape (n_samples,)
         Signed endpoint span, ``upper - lower``. Negative for empty CQR sets.
     explanation_values : UncertaintyExplanation
-        The explanation of the chosen summary: a :class:`~uxplain.ShapExplanation`,
-        :class:`~uxplain.LIMEExplanation` or :class:`~uxplain.PDPExplanation`.
+        The explanation of the chosen summary: a `ShapExplanation`,
+        `LIMEExplanation` or `PDPExplanation`.
     """
 
     lower: np.ndarray
@@ -107,7 +138,14 @@ class ExplanationResult(_ResultMethods):
     explanation_values: UncertaintyExplanation
 
     def to_frame(self) -> pd.DataFrame:
-        """One row per explained observation: ``lower``, ``upper`` and ``width``."""
+        """Return interval predictions for the explained observations.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per observation, with ``lower``, ``upper`` and ``width``
+            columns. Width is the signed difference ``upper - lower``.
+        """
         return pd.DataFrame({"lower": self.lower, "upper": self.upper,
                              "width": self.interval_width})
 
@@ -119,7 +157,7 @@ class ExplanationResult(_ResultMethods):
 
 @dataclass(repr=False)
 class ClassificationExplanationResult(_ResultMethods):
-    """Result of :meth:`UncertaintyExplanationPipeline.explain` for classification.
+    """Result of `UncertaintyExplanationPipeline.explain` for classification.
 
     Attributes
     ----------
@@ -133,8 +171,8 @@ class ClassificationExplanationResult(_ResultMethods):
     classes : np.ndarray of shape (n_classes,)
         Class labels in the order used by ``prediction_set`` and ``p_values``.
     explanation_values : UncertaintyExplanation
-        The explanation of the chosen summary: a :class:`~uxplain.ShapExplanation`,
-        :class:`~uxplain.LIMEExplanation` or :class:`~uxplain.PDPExplanation`.
+        The explanation of the chosen summary: a `ShapExplanation`,
+        `LIMEExplanation` or `PDPExplanation`.
     """
 
     prediction_set: np.ndarray
@@ -146,9 +184,12 @@ class ClassificationExplanationResult(_ResultMethods):
     def to_frame(self) -> pd.DataFrame:
         """One row per explained observation: the prediction set and its summaries.
 
-        Columns are ``prediction_set`` (a tuple of labels), ``set_size``,
-        ``credibility`` (largest p-value) and ``confidence`` (one minus the
-        second-largest p-value; not the nominal coverage level).
+        Returns
+        -------
+        pandas.DataFrame
+            Columns are ``prediction_set`` (a tuple of labels), ``set_size``,
+            ``credibility`` (largest p-value) and ``confidence`` (one minus the
+            second-largest p-value; not the nominal coverage level).
         """
         p = np.sort(np.asarray(self.p_values, dtype=float), axis=1)
         labels = np.asarray(self.classes)
@@ -198,10 +239,11 @@ class UncertaintyExplanationPipeline(BaseEstimator):
     Pipeline integrating conformal prediction and uncertainty explanation.
 
     The pipeline follows the scikit-learn estimator conventions: the
-    constructor only stores its parameters, :meth:`fit` builds and fits the
-    conformal predictor and the explainer, and fitted state ends in an
+    constructor stores and validates its parameters, ``fit`` builds and fits
+    the conformal predictor, and ``explain`` prepares the explainer on its
+    first call. Fitted state ends in an
     underscore (``conformal_predictor_``, ``explainer_``, ``task_``, ...).
-    ``get_params``, ``set_params`` and :func:`sklearn.base.clone` work as for
+    ``get_params``, ``set_params`` and `sklearn.base.clone` work as for
     any estimator; user-supplied components are cloned, never fitted in place.
 
     Supports both regression and classification (selected via ``task``).
@@ -214,27 +256,35 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
     Examples
     --------
-    Regression::
+    Regression, with training and test arrays already prepared:
 
-        from sklearn.ensemble import RandomForestRegressor
-        pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
-        pipeline.fit(X_train, y_train)
-        result = pipeline.explain(X_test)
-        print(pipeline.summary())
-        print(result.feature_importance())
+    ```python
+    from sklearn.ensemble import RandomForestRegressor
+    from uxplain import UncertaintyExplanationPipeline
 
-    Classification::
+    pipeline = UncertaintyExplanationPipeline(model=RandomForestRegressor())
+    pipeline.fit(X_train, y_train)
+    result = pipeline.explain(X_test)
+    print(pipeline.summary())
+    print(result.feature_importance())
+    ```
 
-        from sklearn.ensemble import RandomForestClassifier
-        pipeline = UncertaintyExplanationPipeline(
-            model=RandomForestClassifier(),
-            task="classification",
-            uncertainty_metric="set_size",
-        )
-        pipeline.fit(X_train, y_train)
-        result = pipeline.explain(X_test)
-        print(result.prediction_set)   # (n, n_classes) bool
-        print(result.set_size)         # (n,)
+    Classification, with training labels and test features already prepared:
+
+    ```python
+    from sklearn.ensemble import RandomForestClassifier
+    from uxplain import UncertaintyExplanationPipeline
+
+    pipeline = UncertaintyExplanationPipeline(
+        model=RandomForestClassifier(),
+        task="classification",
+        uncertainty_metric="set_size",
+    )
+    pipeline.fit(X_train, y_train)
+    result = pipeline.explain(X_test)
+    print(result.prediction_set)   # (n_samples, n_classes) bool
+    print(result.set_size)         # (n_samples,)
+    ```
     """
 
     def __init__(
@@ -263,7 +313,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
         Parameters
         ----------
-        model
+        model : estimator, optional
             sklearn-compatible regressor or classifier. Required for crepes
             methods. Ignored when ``conformal_method="cqr"`` or when a custom
             ``conformal_predictor`` is provided.
@@ -305,17 +355,17 @@ class UncertaintyExplanationPipeline(BaseEstimator):
             Seed for the auto calibration split, SHAP background rows and
             permutation sampling, and the LIME perturbation sampler.
 
-        lower_model, upper_model
+        lower_model, upper_model : estimator, optional
             Quantile regressors for CQR. Required when
             ``conformal_method="cqr"`` (regression only).
 
-        conformal_predictor : optional
+        conformal_predictor : ConformalPredictorProtocol or ConformalClassifierProtocol, optional
             Custom conformal predictor (regressor or classifier) implementing
-            :class:`~uxplain.ConformalPredictorProtocol` or
-            :class:`~uxplain.ConformalClassifierProtocol`. Overrides
+            `ConformalPredictorProtocol` or
+            `ConformalClassifierProtocol`. Overrides
             ``conformal_method``. It is cloned at fit time.
 
-        explainer : optional
+        explainer : UncertaintyExplainerProtocol, optional
             Custom explainer instance. Overrides ``xai_method``. It is cloned
             at fit time; if it has a ``cp`` attribute, the clone is bound to
             the pipeline's fitted conformal predictor.
@@ -467,22 +517,29 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
         Parameters
         ----------
-        X_train : np.ndarray or DataFrame
-        y_train : np.ndarray or Series
-        X_calib : np.ndarray or DataFrame, optional
-        y_calib : np.ndarray or Series, optional
-        calib_size : float
+        X_train : array-like of shape (n_train, n_features)
+            Training features. DataFrame columns are retained as feature names.
+        y_train : array-like of shape (n_train,)
+            Training responses or class labels.
+        X_calib : array-like of shape (n_calib, n_features), optional
+            Held-out calibration features in the training column order.
+            Supply together with ``y_calib``, or omit both for an automatic split.
+        y_calib : array-like of shape (n_calib,), optional
+            Calibration responses or class labels.
+        calib_size : float, default=0.2
             Fraction of X_train to use for calibration when X_calib is not
             provided.
-        X_background : np.ndarray, optional
-            Background data for the explainer. Defaults to X_calib.
+        X_background : array-like of shape (n_background, n_features), optional
+            Background data for the explainer. Defaults to the calibration
+            features. The explainer is prepared on the first call to ``explain``.
         random_state : int, optional
             Seed for the auto calibration split. Overrides the pipeline-level
             ``random_state`` for this call only.
 
         Returns
         -------
-        self
+        UncertaintyExplanationPipeline
+            This fitted pipeline, with a cloned and fitted conformal predictor.
         """
 
         self._is_fitted = False
@@ -567,13 +624,27 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         """
         Generate conformal predictions.
 
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Features in the training column order. DataFrame column names must
+            match the training columns when training used a DataFrame.
+        confidence : float, optional
+            Nominal coverage level, strictly between zero and one. Defaults to
+            the pipeline's ``confidence``. Custom backends may restrict the
+            supported coverage levels.
+
         Returns
         -------
-        Regression
-            ``(lower, upper)`` — tuple of arrays.
-        Classification
-            ``prediction_set`` — array of shape ``(n_samples, n_classes)``,
-            dtype=bool.
+        tuple of np.ndarray or np.ndarray
+            Regression returns ``(lower, upper)``, each of shape ``(n_samples,)``.
+            Classification returns a boolean prediction-set array of shape
+            ``(n_samples, n_classes)``, in the column order of ``classes_``.
+
+        Raises
+        ------
+        RuntimeError
+            If the pipeline has not been fitted.
         """
 
         self._check_is_fitted()
@@ -591,11 +662,24 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         """
         Conformal p-value of every candidate label (classification only).
 
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Features in the training column order.
+
         Returns
         -------
         np.ndarray of shape (n_samples, n_classes)
-            Columns follow :attr:`classes_`. A label enters the prediction set
+            Columns follow ``classes_``. A label enters the built-in predictor's set
             when its p-value is at least ``1 - confidence``.
+            These p-values are conformity scores, not class probabilities.
+
+        Raises
+        ------
+        AttributeError
+            If this is a regression pipeline.
+        RuntimeError
+            If the pipeline has not been fitted.
         """
 
         self._check_is_fitted()
@@ -610,9 +694,11 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
         Parameters
         ----------
-        X, y
-            Held-out observations and their responses or labels.
-        groups : array-like, optional
+        X : array-like of shape (n_samples, n_features)
+            Held-out features in the training column order.
+        y : array-like of shape (n_samples,)
+            Responses or class labels for the held-out observations.
+        groups : array-like of shape (n_samples,), optional
             Group of each observation, e.g. ``y`` itself for per-class
             coverage. Adds one row per group.
         confidence : float, optional
@@ -648,7 +734,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
     @property
     def cp(self):
-        """Deprecated alias of :attr:`conformal_predictor_`."""
+        """Deprecated alias of ``conformal_predictor_``."""
 
         warnings.warn(
             "'cp' is deprecated and will be removed in a future release; "
@@ -731,25 +817,31 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
         Parameters
         ----------
-        X : np.ndarray
-        show_plots : bool
-            Whether to display plots.
+        X : array-like of shape (n_samples, n_features)
+            Observations to explain, in the training column order.
+            Partial dependence requires at least two observations.
+        show_plots : bool, default=True
+            Whether to display plots after computing the explanation.
         plot_kind : str or list of str, optional
             For SHAP: ``"beeswarm"``, ``"bar"``, ``"waterfall"``, ``"summary"``.
             For PDP:  ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"pdp_2d"``, ``"importance"``.
             For LIME: ``"local"``.
             Defaults to method-specific defaults when ``None``.
-        waterfall_index : int
+        waterfall_index : int, optional
             Sample index for SHAP waterfall plot or LIME local plot.
         figsize : tuple of (width, height), optional
             Figure size in inches forwarded to the plot function.
-        **explainer_kwargs
-            Passed to explainer.fit().
+        **explainer_kwargs : dict
+            Passed to the explainer's ``fit`` method, for example
+            ``algorithm`` for SHAP, or ``features``,
+            ``grid_resolution`` and ``kind`` for partial dependence.
 
         Returns
         -------
         ExplanationResult or ClassificationExplanationResult
-            Depending on the task.
+            Conformal predictions at the pipeline's ``confidence`` and the
+            explanation of ``uncertainty_metric_``. Use ``to_frame``,
+            ``feature_importance`` and ``plot`` on the returned result.
         """
 
         self._check_is_fitted()
@@ -843,11 +935,28 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
         Parameters
         ----------
+        explanation_values : UncertaintyExplanation
+            Method-specific explanation, typically ``result.explanation_values``
+            from ``explain``.
+        X : array-like of shape (n_samples, n_features), optional
+            Explained feature values for SHAP beeswarm colors. Defaults to
+            the data carried by the SHAP explanation. Also selects a waterfall
+            as the default plot when a single SHAP observation is supplied.
+        kind : str or list of str, optional
+            SHAP: ``"bar"``, ``"beeswarm"``, ``"waterfall"``, ``"summary"``.
+            PDP: ``"pdp"``, ``"ice"``, ``"pdp_ice"``, ``"pdp_2d"``,
+            ``"importance"``. LIME: ``"local"``. Defaults depend on the method.
+        waterfall_index : int, optional
+            Row for a SHAP waterfall or LIME local plot. When omitted, SHAP
+            selects the largest total absolute contribution and LIME the first
+            row.
         figsize : tuple of (width, height), optional
             Figure size in inches forwarded to the underlying plot
             function. When ``None``, each plot function applies its
             own default.
-        show : bool
+        result : object, optional
+            Retained for compatibility; currently unused.
+        show : bool, default=True
             Display the figures. Pass ``False`` to only build them, e.g. to
             save or restyle them first.
 

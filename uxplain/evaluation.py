@@ -1,14 +1,14 @@
 """
 Summaries of fitted conformal predictors and of their explanations.
 
-- :func:`coverage_table` reports empirical coverage and the size of the
+- `coverage_table` reports empirical coverage and the size of the
   conformal outputs (signed interval width or prediction-set size) on labelled
   data, overall and within user-supplied groups.
-- :func:`importance_table` turns an explanation into a global feature ranking,
+- `importance_table` turns an explanation into a global feature ranking,
   optionally with bootstrap intervals over the explained rows.
 
-Both return :class:`pandas.DataFrame` objects, so they print, compare and
-export like any other table. :class:`~uxplain.UncertaintyExplanationPipeline`
+Both return `pandas.DataFrame` objects, so they print, compare and
+export like any other table. `uxplain.UncertaintyExplanationPipeline`
 exposes the first as ``evaluate()``; explanations and results expose the second
 as ``feature_importance()``.
 """
@@ -135,7 +135,7 @@ def importance_table(
     Parameters
     ----------
     explanation
-        A :class:`shap.Explanation`, ``LIMEExplanation`` or ``PDPExplanation``.
+        A `shap.Explanation`, ``LIMEExplanation`` or ``PDPExplanation``.
     feature_names : sequence of str, optional
         Overrides the names carried by the explanation.
     n_boot : int, default=0
