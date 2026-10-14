@@ -30,7 +30,7 @@ class CrepesConformalClassifier(BaseEstimator):
     model : object
         Any sklearn-compatible classifier exposing
         ``fit``, ``predict``, and ``predict_proba``.
-    method : ClassificationConformalMethod
+    method : ClassificationConformalMethod, default="standard"
         Conformal classification method:
 
         - ``"standard"``    : basic (marginal) conformal classifier
@@ -45,6 +45,12 @@ class CrepesConformalClassifier(BaseEstimator):
         explainers require ``smoothing=False``. Non-smoothed p-values are
         deterministic for a fixed deterministic model and conservative under
         the conformal assumptions; smoothing does not repair invalid sampling.
+
+    Attributes
+    ----------
+    classes_ : numpy.ndarray of shape (n_classes,)
+        Labels learned by the fitted model, in the column order used by
+        `predict_set`, `predict_p`, and `predict_proba`.
 
     Notes
     -----
@@ -87,12 +93,31 @@ class CrepesConformalClassifier(BaseEstimator):
         **kwargs,
     ):
         """
-        Fit conformal classifier.
+        Fit the classifier and calibrate conformal prediction sets.
 
-        Steps:
-        1. Fit underlying model
-        2. Optionally fit Mondrian categorizer
-        3. Calibrate conformal classifier
+        Calibration uses all observations for `standard`, groups by true class
+        for `class_cond`, and groups by the fitted model's predicted class for
+        `mondrian`.
+
+        Parameters
+        ----------
+        X_train : array-like of shape (n_train, n_features)
+            Features used to fit the underlying classifier.
+        y_train : array-like of shape (n_train,)
+            Training class labels. The fitted model must include the full
+            target label space in its `classes_` attribute.
+        X_calib : array-like of shape (n_calib, n_features)
+            Held-out calibration features with the same columns as `X_train`.
+        y_calib : array-like of shape (n_calib,)
+            Calibration labels. Labels absent from the fitted model's
+            `classes_` raise a `ValueError`.
+        **kwargs : dict
+            Additional keyword arguments are accepted and ignored.
+
+        Returns
+        -------
+        self : CrepesConformalClassifier
+            The fitted and calibrated classifier.
         """
 
         self.wrapper = None
@@ -135,14 +160,17 @@ class CrepesConformalClassifier(BaseEstimator):
 
         Parameters
         ----------
-        X : np.ndarray
-        confidence : float
+        X : array-like of shape (n_samples, n_features)
+            Features for which to generate sets, in training column order.
+        confidence : float, default=0.9
+            Requested coverage level, strictly between 0 and 1. Conditional
+            methods calibrate this level within their selected groups.
 
         Returns
         -------
-        prediction_set : np.ndarray of shape (n_samples, n_classes), dtype=bool
-            ``True`` at position ``[i, k]`` means class ``k`` is included in
-            the prediction set for sample ``i``.
+        prediction_set : numpy.ndarray of shape (n_samples, n_classes), dtype=bool
+            `True` at position `[i, k]` means label `classes_[k]` is included in
+            the prediction set for sample `i`. Columns follow `classes_` order.
         """
 
         if self.wrapper is None:
@@ -164,9 +192,18 @@ class CrepesConformalClassifier(BaseEstimator):
         """
         Compute conformal p-values for each class.
 
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Features to evaluate, in training column order.
+
         Returns
         -------
-        p_values : np.ndarray of shape (n_samples, n_classes)
+        p_values : numpy.ndarray of shape (n_samples, n_classes)
+            Conformal p-values between 0 and 1. Entry `[i, k]` evaluates
+            candidate label `classes_[k]` for sample `i`. These values use
+            the configured `smoothing` and `random_state`; they are not
+            model probabilities and need not sum to one across classes.
         """
 
         if self.wrapper is None:
@@ -181,7 +218,20 @@ class CrepesConformalClassifier(BaseEstimator):
         self,
         X: np.ndarray,
     ) -> np.ndarray:
-        """Underlying model probabilities."""
+        """Return class probabilities from the underlying fitted model.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Features to evaluate, in training column order.
+
+        Returns
+        -------
+        probabilities : numpy.ndarray of shape (n_samples, n_classes)
+            Model probabilities in `classes_` column order. Entry `[i, k]`
+            is the probability assigned to label `classes_[k]` for sample
+            `i`. No conformal calibration is applied to these probabilities.
+        """
 
         return self.model.predict_proba(np.asarray(X))
 

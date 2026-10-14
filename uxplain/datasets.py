@@ -2,7 +2,7 @@
 Real-world labour-force datasets used in the paper's illustrations.
 
 Two national household surveys, loaded through a small scikit-learn-style
-interface: each loader returns a :class:`sklearn.utils.Bunch` (with ``data``,
+interface: each loader returns a `sklearn.utils.Bunch` (with ``data``,
 ``target``, ``frame``, ``feature_names``, ``groups``, ``provenance`` and
 ``DESCR``), or the ready-to-model ``(X, y)`` pair when called with
 ``return_X_y=True``::
@@ -13,10 +13,10 @@ interface: each loader returns a :class:`sklearn.utils.Bunch` (with ``data``,
     X, y = load_geih("data/geih", return_X_y=True)      # Colombia, classification
 
 - **PNAD Contínua** (IBGE, Brazil) — conformal *regression* on monthly labour
-  income. :func:`fetch_pnadc` downloads the quarter from the IBGE public server
+  income. `fetch_pnadc` downloads the quarter from the IBGE public server
   and caches it, so nothing is shipped with the package.
 - **GEIH** (DANE, Colombia) — conformal *classification* of occupational group.
-  :func:`load_geih` reads a copy the user has downloaded from DANE; see the note
+  `load_geih` reads a copy the user has downloaded from DANE; see the note
   on data terms below.
 
 Coding of the modelling columns
@@ -43,7 +43,7 @@ survey's sampling design (strata, primary sampling units, weights).
 Reproducibility
 ---------------
 Producers re-release microdata under new file names (IBGE date-stamps every
-release). Pass ``archive`` and ``sha256`` to :func:`fetch_pnadc` to pin one
+release). Pass ``archive`` and ``sha256`` to `fetch_pnadc` to pin one
 release; both loaders report the files they read, with their SHA-256 digests, in
 ``provenance``.
 
@@ -54,11 +54,11 @@ either fetch from the producer's own server or read a local copy the user
 obtained themselves. When you use these datasets you must cite the producer:
 
 - IBGE microdata are public and may be reproduced with attribution
-  (see :data:`PNADC_CITATION`).
+  (see `PNADC_CITATION`).
 - DANE authorises use, transformation and analysis of its anonymised microdata
-  **provided the source is cited** (:data:`GEIH_CITATION`); it does not
+  **provided the source is cited** (`GEIH_CITATION`); it does not
   authorise redistribution or commercial use, which is exactly why
-  :func:`load_geih` never downloads or ships the data. Obtain a month from
+  `load_geih` never downloads or ships the data. Obtain a month from
   https://microdatos.dane.gov.co and point the loader at it.
 
 These helpers prepare predictive examples. They do not establish survey-design
@@ -110,7 +110,7 @@ GEIH_CITATION = (
     "www.dane.gov.co."
 )
 
-#: PNAD Contínua source columns kept by :func:`fetch_pnadc`, mapped to readable
+#: PNAD Contínua source columns kept by `fetch_pnadc`, mapped to readable
 #: names. ``UPA``, ``V1008`` and ``V1014`` identify the household within a
 #: quarter.
 PNADC_VARIABLES: dict[str, str] = {
@@ -133,12 +133,12 @@ PNADC_VARIABLES: dict[str, str] = {
     "V1028": "weight",            # calibrated survey weight
 }
 
-#: GEIH source columns expected by :func:`load_geih`, mapped to the same schema.
+#: GEIH source columns expected by `load_geih`, mapped to the same schema.
 #:
 #: These are the names used since the 2022 questionnaire redesign, which renamed
 #: several fields (sex moved from ``P6020`` to ``P3271``, education from
 #: ``P6210`` to ``P3042``, and the occupation code became ``OFICIO_C8``). Pass an
-#: explicit mapping to :func:`load_geih` for earlier years.
+#: explicit mapping to `load_geih` for earlier years.
 GEIH_VARIABLES: dict[str, str] = {
     "P3271": "sex",               # 1 man, 2 woman
     "P6040": "age",
@@ -185,7 +185,14 @@ CIUO_MAJOR_GROUPS = MAJOR_OCCUPATION_GROUPS
 
 def default_cache_dir() -> Path:
     """Directory used to cache downloaded microdata (override with
-    ``UXPLAIN_DATA_HOME``)."""
+    ``UXPLAIN_DATA_HOME``).
+
+    Returns
+    -------
+    pathlib.Path
+        Directory given by ``UXPLAIN_DATA_HOME`` when set, otherwise
+        ``.cache/uxplain`` under the user's home directory.
+    """
     root = os.environ.get("UXPLAIN_DATA_HOME")
     return Path(root) if root else Path.home() / ".cache" / "uxplain"
 
@@ -240,7 +247,7 @@ def _finalize(frame, features, target, *, return_X_y, subsample, random_state,
     """Coerce the modelling columns, drop unusable rows, and package the result.
 
     Returns ``(X, y)`` when ``return_X_y`` is set, otherwise a
-    :class:`sklearn.utils.Bunch`.
+    `sklearn.utils.Bunch`.
     """
     features = list(features)
     if not features:
@@ -473,20 +480,20 @@ def fetch_pnadc(
 
     The ~200 MB archive is downloaded from the IBGE public server on first use
     and cached, so later calls need no network. Nothing is shipped with the
-    package. When you use this data, cite the source (:data:`PNADC_CITATION`).
+    package. When you use this data, cite the source (`PNADC_CITATION`).
 
     Parameters
     ----------
     year, quarter
         Reference quarter, e.g. ``2024, 1``.
     features
-        Modelling columns. Defaults to :data:`PNADC_FEATURES`.
+        Modelling columns. Defaults to `PNADC_FEATURES`.
     target
         Response column. ``"income"`` (regression, default). Other useful
         choices: ``"informal"`` and ``"occupation_group"`` (classification).
     return_X_y
         If ``True``, return ``(X, y)`` instead of a
-        :class:`~sklearn.utils.Bunch`.
+        `sklearn.utils.Bunch`.
     subsample
         If given, randomly keep this many rows (useful to keep an illustration
         fast; the conformal guarantee does not depend on the sample size).
@@ -506,7 +513,7 @@ def fetch_pnadc(
     sha256
         Expected SHA-256 digest of the archive. A mismatch raises an error.
     cache_dir
-        Download cache. Defaults to :func:`default_cache_dir`.
+        Download cache. Defaults to `default_cache_dir`.
 
     Returns
     -------
@@ -538,7 +545,7 @@ def fetch_pnadc(
 # ---------------------------------------------------------------------------
 
 def _is_wanted_geih_module(name: str) -> bool:
-    """True for the two person-level GEIH modules :func:`load_geih` needs.
+    """True for the two person-level GEIH modules `load_geih` needs.
 
     ``"No ocupados"`` is disjoint from ``"Ocupados"`` (merging either in would
     empty the result), so the match on the employed module is exact.
@@ -652,7 +659,7 @@ def load_geih(
     This function never downloads anything: DANE authorises using and analysing
     its anonymised microdata with attribution but not redistributing it, so you
     obtain a month yourself and point ``path`` at it. Cite the source when you
-    use the data (:data:`GEIH_CITATION`).
+    use the data (`GEIH_CITATION`).
 
     To get the data: open https://microdatos.dane.gov.co, choose *Gran Encuesta
     Integrada de Hogares (GEIH)* for a month, download and unzip it, and pass the
@@ -668,7 +675,7 @@ def load_geih(
         A directory holding the module CSVs (scanned recursively; only the two
         person-level modules are merged), a list of CSV paths, or a single CSV.
     features
-        Modelling columns. Defaults to :data:`GEIH_FEATURES`.
+        Modelling columns. Defaults to `GEIH_FEATURES`.
     target
         Response column. ``"occupation_group"`` (classification, default); the
         4-digit CIUO-08 A.C. occupation collapsed to its major group. Other
@@ -676,13 +683,13 @@ def load_geih(
         classification).
     return_X_y
         If ``True``, return ``(X, y)`` instead of a
-        :class:`~sklearn.utils.Bunch`.
+        `sklearn.utils.Bunch`.
     subsample, random_state
         Optionally keep a random subset of ``subsample`` rows; ``random_state``
         also seeds ``one_per_household``.
     variables
         Override the source-column mapping (DANE renames fields between years).
-        Defaults to :data:`GEIH_VARIABLES`.
+        Defaults to `GEIH_VARIABLES`.
     min_income
         Drop incomes below this value.
     one_per_household
@@ -692,7 +699,7 @@ def load_geih(
     Returns
     -------
     sklearn.utils.Bunch or tuple
-        Same shape as :func:`fetch_pnadc`; ``provenance`` lists the SHA-256
+        Same shape as `fetch_pnadc`; ``provenance`` lists the SHA-256
         digest of every module file read.
     """
     frame, provenance = _geih_frame(path, variables, min_income)

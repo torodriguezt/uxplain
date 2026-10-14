@@ -1,4 +1,49 @@
 site_name: uxplain
-# 
-site_author: Veronica Seguro
-# 
+site_description: Explainability for conformal prediction uncertainty
+site_author: Tomas Rodriguez Taborda, Veronica Seguro Varela, Rafael Izbicki, Johnatan Cardona Jimenez
+site_url: https://torodriguezt.github.io/uxplain/
+repo_url: https://github.com/torodriguezt/uxplain
+edit_uri: edit/main/docs/docs/
+
+theme:
+  name: material
+  font: false
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Extending: extending.md
+  - API reference: api.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [..]
+          options:
+            docstring_style: numpy
+            merge_init_into_class: true
+            show_root_heading: true
+            show_source: false
+            show_signature_annotations: true
+            heading_level: 3
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    anchors: warn
+    unrecognized_links: warn

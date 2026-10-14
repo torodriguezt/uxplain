@@ -39,8 +39,8 @@ class PDPExplanation(UncertaintyExplanation):
     Attributes
     ----------
     values : list of np.ndarray
-        Averaged PDP values per feature (the marginal effect on
-        interval width across the grid). One 1D array per feature;
+        Averaged values of the selected uncertainty metric across each
+        feature's grid. One 1D array per feature;
         lengths may differ because sklearn caps the grid at the
         number of unique values (e.g. categorical features).
 
@@ -53,8 +53,9 @@ class PDPExplanation(UncertaintyExplanation):
     feature_names : list of str or None
         Human-readable feature labels.
 
-    individual : np.ndarray or None, shape (n_features, n_samples, grid_resolution)
-        ICE lines — one curve per sample per feature.
+    individual : list of np.ndarray or None
+        ICE lines — one array of shape ``(n_samples, n_grid_points)`` per
+        feature. Grid lengths can differ across features.
         Only present when ``kind="individual"`` or ``kind="both"``.
 
     importance : list of float or None
@@ -64,6 +65,16 @@ class PDPExplanation(UncertaintyExplanation):
         curve means the feature barely moves the uncertainty metric
         (importance ≈ 0), a strongly varying curve means high importance.
         Only covers 1D features; 2D interaction pairs are not included.
+    kind : {"average", "individual", "both"}
+        Requested partial-dependence output. Averaged curves are always stored.
+    feature_pairs : list of tuple of int, optional
+        Pairs of feature indices for two-dimensional partial dependence.
+    values_2d : list of np.ndarray, optional
+        Averaged surfaces, one array per pair of feature grids.
+    grid_values_2d : list of tuple of np.ndarray, optional
+        Two grid axes for each pair in ``feature_pairs``.
+    metric : str
+        The explained summary, such as ``"width"`` or ``"set_size"``.
     """
 
     values: list[np.ndarray]
@@ -98,7 +109,7 @@ class PDPExplanation(UncertaintyExplanation):
         """Partial-dependence figures: ``"pdp"``, ``"ice"``, ``"pdp_ice"``,
         ``"pdp_2d"`` and ``"importance"``.
 
-        Keyword arguments are passed to :func:`uxplain.plots.generate_pdp_plots`.
+        Keyword arguments are passed to `uxplain.plots.generate_pdp_plots`.
         """
         from ..plots import generate_pdp_plots
 
@@ -145,6 +156,8 @@ class PDPUncertaintyExplainer(BaseEstimator):
             Fitted conformal predictor.
 
         confidence : float
+            Nominal coverage in ``(0, 1)`` used to construct the explained
+            intervals or prediction sets.
 
         method : str
             PDP computation method. ``"brute"`` works for any estimator.
@@ -173,11 +186,13 @@ class PDPUncertaintyExplainer(BaseEstimator):
             Feature names for explanation output.
 
         n_jobs : int, optional
-            Number of parallel jobs for ``PartialDependenceDisplay``.
-            ``-1`` uses all available cores.
+            Reserved for estimator compatibility; currently unused. Features
+            are evaluated sequentially.
 
-        metric : {"width", "lower", "upper", "midpoint"}
-            Which scalar function of ``(lower, upper)`` to explain.
+        metric : str
+            Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
+            ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
+            or ``"confidence"`` for classification.
         """
 
         self.cp = cp
@@ -212,7 +227,8 @@ class PDPUncertaintyExplainer(BaseEstimator):
         Parameters
         ----------
         X_background : np.ndarray
-            Data used to set the grid range for each feature.
+            Array accepted when initializing the estimator. The rows passed to
+            ``explain()`` determine the grids and marginalization sample.
         features : list, optional
             Mixed list of 1D features and 2D interaction pairs:
 
@@ -227,6 +243,13 @@ class PDPUncertaintyExplainer(BaseEstimator):
             Overrides the value set at ``__init__``. Unchanged when ``None``.
         percentiles : tuple of float, optional
             Overrides the value set at ``__init__``. Unchanged when ``None``.
+        **_
+            Additional keyword arguments are accepted and ignored.
+
+        Returns
+        -------
+        None
+            Initializes the scalar target estimator and resolves feature names.
         """
 
         if kind is not None:

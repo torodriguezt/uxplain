@@ -63,22 +63,26 @@ class ShapUncertaintyExplainer(BaseEstimator):
             Fitted conformal predictor.
 
         confidence : float
+            Nominal coverage in ``(0, 1)`` used to construct the explained
+            intervals or prediction sets.
 
         algorithm : str
-            Passed to :class:`shap.Explainer` for the generic path. ``"auto"``
+            Passed to `shap.Explainer` for the generic path. ``"auto"``
             uses the exact algorithm up to ten features and the permutation
             approximation beyond.
 
         feature_names : list of str, optional
             Feature names for SHAP explanation output.
 
-        metric : {"width", "lower", "upper", "midpoint"}
-            Which scalar function of ``(lower, upper)`` to explain.
+        metric : str
+            Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
+            ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
+            or ``"confidence"`` for classification.
 
         fast_path : bool
             Use exact TreeSHAP on the component models when the metric is an
             affine function of them and those models are tree ensembles (see
-            :mod:`uxplain.explainability.fast_shap`). Falls back to the generic
+            `uxplain.explainability.fast_shap`). Falls back to the generic
             explainer whenever the shortcut does not apply. Set to ``False`` to
             always take the generic path, e.g. to compare the two.
 
@@ -129,6 +133,19 @@ class ShapUncertaintyExplainer(BaseEstimator):
     ) -> None:
         """
         Build SHAP explainer from background data.
+
+        Parameters
+        ----------
+        X_background : np.ndarray of shape (n_background, n_features)
+            Reference rows defining the interventional SHAP game. Subsampled
+            according to ``background_size`` and ``random_state``.
+        algorithm : str, optional
+            Override the constructor's generic SHAP algorithm for this fit.
+
+        Returns
+        -------
+        None
+            Initializes the explainer and resets the last algorithm report.
         """
 
         self._target_function = make_uncertainty_function(
@@ -169,11 +186,16 @@ class ShapUncertaintyExplainer(BaseEstimator):
         Takes the exact TreeSHAP shortcut when it applies, otherwise runs the
         generic SHAP explainer over the composed uncertainty function.
 
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Rows to explain using the fitted background reference.
+
         Returns
         -------
         ShapExplanation
             Attributions, base values and the explained rows. Use
-            :meth:`ShapExplanation.to_shap` for SHAP's own plotting functions.
+            `ShapExplanation.to_shap` for SHAP's own plotting functions.
         """
 
         if self._shap_explainer is None:

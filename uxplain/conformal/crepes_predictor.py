@@ -55,8 +55,9 @@ class CrepesConformalPredictor(BaseEstimator):
     ----------
     model : object
         Any sklearn-compatible regressor.
-    method : ConformalMethod
+    method : ConformalMethod, default="normalized"
         Conformal prediction method to use:
+
         - "standard": basic conformal prediction
         - "normalized": uses a DifficultyEstimator for
           adaptive interval widths
@@ -88,12 +89,28 @@ class CrepesConformalPredictor(BaseEstimator):
         **kwargs,
     ):
         """
-        Fit conformal predictor.
+        Fit the regressor and calibrate conformal prediction intervals.
 
-        Steps:
-        1. Fit model
-        2. Fit difficulty estimator and/or Mondrian categorizer
-        3. Calibrate conformal predictor
+        The difficulty estimator and Mondrian categorizer, when selected,
+        are fitted on the training data before calibration.
+
+        Parameters
+        ----------
+        X_train : array-like of shape (n_train, n_features)
+            Features used to fit the regressor and any auxiliary estimators.
+        y_train : array-like of shape (n_train,)
+            Training target values.
+        X_calib : array-like of shape (n_calib, n_features)
+            Held-out calibration features with the same columns as `X_train`.
+        y_calib : array-like of shape (n_calib,)
+            Calibration target values used to compute conformity scores.
+        **kwargs : dict
+            Additional keyword arguments are accepted and ignored.
+
+        Returns
+        -------
+        self : CrepesConformalPredictor
+            The fitted and calibrated predictor.
         """
 
         self.wrapper = None
@@ -147,14 +164,19 @@ class CrepesConformalPredictor(BaseEstimator):
 
         Parameters
         ----------
-        X : np.ndarray
-
-        confidence : float
+        X : array-like of shape (n_samples, n_features)
+            Features for which to generate intervals, in training column order.
+        confidence : float, default=0.9
+            Requested coverage level, strictly between 0 and 1. Mondrian
+            methods calibrate this level within their selected groups.
 
         Returns
         -------
-        lower : np.ndarray
-        upper : np.ndarray
+        lower : numpy.ndarray of shape (n_samples,)
+            Lower interval endpoints.
+        upper : numpy.ndarray of shape (n_samples,)
+            Upper interval endpoints. A Mondrian group absent from calibration
+            receives an unbounded interval with endpoints `(-inf, inf)`.
         """
 
         if self.wrapper is None:

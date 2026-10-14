@@ -17,10 +17,7 @@ Requires Python 3.10 or later.
 pip install uxplain
 ```
 
-## Regression
-
-Explain prediction interval width with SHAP. `fit()` automatically reserves a
-separate calibration sample.
+## Example
 
 ```python
 from sklearn.datasets import make_regression
@@ -28,59 +25,78 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from uxplain import UncertaintyExplanationPipeline
 
-X, y = make_regression(n_samples=300, n_features=4, noise=15, random_state=42)
+X, y = make_regression(n_samples=400, n_features=4, noise=15, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
 pipe = UncertaintyExplanationPipeline(
     model=RandomForestRegressor(n_estimators=50, random_state=42),
-    confidence=0.9,
-    xai_method="shap",
     uncertainty_metric="width",
     random_state=42,
 )
 pipe.fit(X_train, y_train)
-result = pipe.explain(X_test[:5], show_plots=False)
+print(pipe.summary())                # configuration and fitted sample sizes
+print(pipe.evaluate(X_test, y_test))   # empirical coverage and interval width
 
-print(result.interval_width)
-print(result.explanation_values)
+result = pipe.explain(X_test[:20], show_plots=False)
+print(result.feature_importance())     # which features drive the width
+print(result.to_frame())               # bounds and width for the explained rows
 ```
 
-## Classification
-
-Use a classifier and `set_size` to explain how many labels enter the prediction set.
+With a classifier, the same pipeline explains prediction-set summaries such as
+`set_size`. The following example is independent of the regression example:
 
 ```python
-from sklearn.datasets import load_iris
+import pandas as pd
+from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from uxplain import UncertaintyExplanationPipeline
 
-X, y = load_iris(return_X_y=True)
+X, y = make_classification(
+    n_samples=300, n_features=4, n_informative=3,
+    n_redundant=0, random_state=42,
+)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
-
-pipe = UncertaintyExplanationPipeline(
+classifier = UncertaintyExplanationPipeline(
     model=RandomForestClassifier(n_estimators=50, random_state=42),
     uncertainty_metric="set_size",
     random_state=42,
-)
-pipe.fit(X_train, y_train)
-result = pipe.explain(X_test[:5], show_plots=False)
+).fit(X_train, y_train)
 
-print(result.prediction_set)
-print(result.explanation_values)
+print(pd.DataFrame(classifier.predict_p(X_test[:5]), columns=classifier.classes_))
+print(classifier.evaluate(X_test, y_test, groups=y_test))
 ```
+
+`predict_p()` returns conformal p-values for classification. Its columns follow
+`classes_`; these values are not class probabilities and need not sum to one.
+`predict()` returns a Boolean prediction-set matrix in the same column order.
+
+The pipeline and its components follow scikit-learn conventions
+(`get_params`, `set_params`, `clone`), and custom conformal backends can be
+plugged in through a small protocol.
 
 ## Learn more
 
 The [getting-started guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md)
-covers calibration, other uncertainty summaries and explainer options. See the
-[notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks) for more examples
-and the [release guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#releasing)
-for development and publishing.
-
-Coverage guarantees depend on the conformal method's
+covers classification, calibration, the available summaries and explainer
+options. The [Extending guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/extending.md)
+includes a complete MAPIE adapter, and the
+[API reference source](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/api.md)
+defines the reference generated from the package's docstrings. See the
+[notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks)
+for more examples. Coverage guarantees depend on the conformal method's
 [statistical assumptions](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md#statistical-scope-and-limitations);
 they do not extend to the explanations themselves.
+
+To build the documentation from a repository checkout:
+
+```bash
+python -m pip install -e ".[docs]"
+python -m mkdocs build --strict -f docs/mkdocs.yml
+python -m mkdocs serve -f docs/mkdocs.yml
+```
+
+The preview is served at <http://127.0.0.1:8000/uxplain/>.
 
 ## Authors
 
