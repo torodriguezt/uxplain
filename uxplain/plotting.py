@@ -41,6 +41,7 @@ __all__ = [
     "STYLE",
     "ice_curves",
     "importance_bar",
+    "importance_plot",
     "lime_local",
     "pdp_curve",
     "pdp_importance",
@@ -377,17 +378,19 @@ def shap_bar(
     return ax
 
 
-def importance_bar(
+def importance_plot(
     table,
     ax=None,
     max_display: int | None = None,
+    kind: str = "dot",
+    order: list[str] | None = None,
     figsize: tuple[float, float] = (9, 5),
     show_values: bool = True,
     xlabel: str = "Importance",
     title: str | None = None,
     **style_overrides,
 ):
-    """Global importance table as a horizontal bar chart.
+    """Global importance as aligned estimates and intervals (or optional bars).
 
     Parameters
     ----------
@@ -396,6 +399,10 @@ def importance_bar(
         `feature_importance()`, indexed by feature with an `importance` column.
         If both `ci_lower` and `ci_upper` are present, they are drawn as error
         bars and must bracket the corresponding importance estimate.
+    kind : {"dot", "bar"}, default="dot"
+        Dot-and-interval display, or bars for compatibility.
+    order : list of str, optional
+        Explicit feature order from top to bottom, shared across panels.
     ax : matplotlib.axes.Axes, optional
         Axes to draw into. A new figure and axes are created when omitted.
     max_display : int, optional
@@ -421,13 +428,24 @@ def importance_bar(
     style = _style(style_overrides)
     importance = np.asarray(table["importance"], dtype=float)
     names = [str(name) for name in table.index]
-    order = _top_features(importance, max_display)
+    if kind not in ("dot", "bar"):
+        raise ValueError("kind must be 'dot' or 'bar'.")
+    if order is None:
+        order = _top_features(importance, max_display)
+    else:
+        if len(set(order)) != len(order) or not set(order) <= set(names):
+            raise ValueError("order must contain distinct feature names from the table.")
+        order = np.array([names.index(name) for name in order[::-1]])
 
     fig, ax, _ = _new_ax(ax, figsize)
     y = np.arange(len(order))
-    ax.barh(y, importance[order], color=style["magnitude_color"],
-            edgecolor=style["bar_edge_color"],
-            height=style["bar_height"], zorder=3)
+    if kind == "bar":
+        ax.barh(y, importance[order], color=style["magnitude_color"],
+                edgecolor=style["bar_edge_color"],
+                height=style["bar_height"], zorder=3)
+    else:
+        ax.hlines(y, 0, importance[order], color=style["grid_color"], linewidth=1, zorder=1)
+        ax.scatter(importance[order], y, s=36, color=style["magnitude_color"], zorder=5)
     upper_end = importance[order]
     if "ci_lower" in table and "ci_upper" in table:
         lower = np.asarray(table["ci_lower"], dtype=float)[order]
@@ -435,7 +453,7 @@ def importance_bar(
         ax.errorbar(importance[order], y,
                     xerr=[importance[order] - lower, upper - importance[order]],
                     fmt="none", ecolor=style["title_color"], elinewidth=1.1,
-                    capsize=3, zorder=4)
+                    capsize=0, zorder=4)
         upper_end = upper
     ax.set_yticks(y)
     ax.set_yticklabels([names[i] for i in order])
@@ -448,8 +466,15 @@ def importance_bar(
     ax.set_xlim(0, max(np.max(upper_end) * 1.22, 1e-9))
 
     _finish(ax, style, title=title or "", xlabel=xlabel)
+    ax.spines["left"].set_visible(False)
+    ax.set_ylim(-0.7, len(order) - 0.3)
     fig.tight_layout()
     return ax
+
+
+def importance_bar(table, *args, **kwargs):
+    """Horizontal importance bars; use importance_plot for dots and intervals."""
+    return importance_plot(table, *args, kind="bar", **kwargs)
 
 
 def _swarm_offsets(vals: np.ndarray, n_bins: int = 100,
@@ -672,7 +697,7 @@ def shap_waterfall(
     for feat in shown:
         label = names[feat]
         if row is not None:
-            label = f"{_format_number(row[feat])} = {label}"
+            label = f"{label} = {_format_number(row[feat])}"
         labels.append(label)
         contribs.append(phi[feat])
     if len(hidden):
@@ -680,55 +705,43 @@ def shap_waterfall(
         contribs.append(float(phi[hidden].sum()))
 
     contribs = np.asarray(contribs)
-    # Draw smallest contribution at the top of the axis, largest at the bottom.
-    labels, contribs = labels[::-1], contribs[::-1]
-
-    starts = base_value + np.concatenate([[0.0], np.cumsum(contribs)[:-1]])
+    starts = base_value + np.r_[0., np.cumsum(contribs)[:-1]]
+    ends = starts + contribs
     total = base_value + contribs.sum()
-
     fig, ax, _ = _new_ax(ax, figsize)
-    y = np.arange(len(contribs))
+    n = len(contribs)
+    y = np.arange(n, 0, -1)
     colors = _sign_colors(contribs, style)
-    ax.barh(y, contribs, left=starts, color=colors,
-            edgecolor=style["bar_edge_color"],
-            height=style["bar_height"], zorder=3)
-
-    span = max(np.abs(contribs).max(), abs(total - base_value), 1e-9)
-    pad = 0.02 * span
+    span = max(np.ptp(np.r_[base_value, starts, ends]), 1e-9)
+    pad = .025 * span
     decimals = _decimals([*contribs, base_value, total])
-    for yi, (start, c) in enumerate(zip(starts, contribs)):
-        tip = start + c
-        ax.text(tip + (pad if c >= 0 else -pad), yi, f"{c:+.{decimals}f}",
-                va="center", ha="left" if c >= 0 else "right",
-                fontsize=style["annotation_size"], color=style["label_color"])
-
-    ax.axvline(base_value, color=style["reference_color"],
-               linestyle="--", linewidth=1.0, zorder=2)
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-
-    # Reserve a header band inside the axes for the baseline/outcome labels, so
-    # they never collide with the title above or the tick labels below.
-    header = len(contribs) - 0.3 + 0.7
-    ax.set_ylim(-0.7, header)
-
+    for yi, start, end, value, color in zip(y, starts, ends, contribs, colors):
+        # The arrow direction encodes the sign, including small negative effects.
+        ax.arrow(start, yi, value, 0, width=.10, head_width=.25,
+                 head_length=min(abs(value) * .35, .04 * span),
+                 length_includes_head=True, color=color, linewidth=0, zorder=3)
+        ax.plot([start, start], [yi + 1 - .2, yi + .2],
+                color=style["reference_color"], lw=.8, ls=":", zorder=1)
+        ax.text(max(start, end) + pad, yi, f"{value:+.{decimals}f}",
+                va="center", fontsize=style["annotation_size"], color=style["label_color"])
+    ax.plot([total, total], [.2, .8], color=style["reference_color"], lw=.8, ls=":")
+    ax.scatter([base_value, total], [n+1, 0], s=[40, 60], marker="D",
+               color=style["title_color"], zorder=5)
+    for yi, value in [(n+1, base_value), (0, total)]:
+        ax.text(value+pad, yi, f"{value:.{decimals}f}", va="center",
+                fontsize=style["annotation_size"], color=style["title_color"],
+                fontweight="bold")
+    ax.axvline(base_value, color=style["reference_color"], linestyle="--", lw=.8, zorder=0)
+    ax.set_yticks([n+1, *y, 0])
+    ax.set_yticklabels(["Reference", *labels, "Explained value"])
+    ax.set_ylim(-.7, n+1.7)
+    lo = np.min(np.r_[base_value, starts, ends])
+    hi = np.max(np.r_[base_value, starts, ends])
+    ax.set_xlim(lo-.08*span, hi+.25*span)
     metric_txt = _metric_text(explanation, metric)
-    _finish(ax, style,
-            title=title if title is not None
-            else f"How {metric_txt.lower()} is built up for sample {index}",
+    _finish(ax, style, title=title if title is not None else f"Contributions for sample {index}",
             xlabel=metric_txt)
-
-    label_y = header - 0.25
-    ax.text(base_value, label_y, f"$E[f(X)]$ = {base_value:.{decimals}f}",
-            ha="center", va="center", fontsize=style["annotation_size"],
-            color=style["tick_color"])
-    ax.text(total, label_y, f"$f(x)$ = {total:.{decimals}f}",
-            ha="center", va="center", fontsize=style["annotation_size"],
-            color=style["title_color"])
-
-    lo = min(starts.min(), base_value, total)
-    hi = max((starts + contribs).max(), base_value, total)
-    ax.set_xlim(lo - 0.22 * span, hi + 0.22 * span)
+    ax.spines["left"].set_visible(False)
     fig.tight_layout()
     return ax
 
@@ -860,6 +873,8 @@ def pdp_with_ice(
     figsize: tuple[float, float] = (8, 6),
     metric_name: str = "Interval width",
     max_lines: int = 80,
+    ice_style: str = "band",
+    feature_values=None,
     title: str | None = None,
     **style_overrides,
 ):
@@ -884,6 +899,11 @@ def pdp_with_ice(
     max_lines : int, default=80
         Maximum number of individual curves, reproducibly sampled without
         replacement if needed. The supplied average curve is not recomputed.
+    ice_style : {"band", "lines"}, default="band"
+        Pointwise central 50% and 90% ICE ranges, or individual curves.
+        These ranges describe heterogeneity, not confidence intervals.
+    feature_values : array-like, optional
+        Observed feature values; their deciles are marked along the axis.
     title : str, optional
         Title override. `None` generates a title; `""` omits it.
     **style_overrides : object
@@ -897,9 +917,22 @@ def pdp_with_ice(
     """
     style = _style(style_overrides)
     fig, ax, _ = _new_ax(ax, figsize)
-    ice_curves(grid, individual, ax=ax, feature_name=feature_name,
-               metric_name=metric_name, max_lines=max_lines,
-               title="", **style_overrides)
+    if ice_style == "lines":
+        ice_curves(grid, individual, ax=ax, feature_name=feature_name,
+                   metric_name=metric_name, max_lines=max_lines,
+                   title="", **style_overrides)
+    elif ice_style == "band":
+        q05, q25, q75, q95 = np.quantile(individual, [.05, .25, .75, .95], axis=0)
+        ax.fill_between(grid, q05, q95, color=style["ice_color"], alpha=.18,
+                        linewidth=0, label="Central 90% of ICE")
+        ax.fill_between(grid, q25, q75, color=style["ice_color"], alpha=.38,
+                        linewidth=0, label="Central 50% of ICE")
+    else:
+        raise ValueError("ice_style must be 'band' or 'lines'.")
+    if feature_values is not None:
+        ticks = np.unique(np.quantile(feature_values, np.linspace(.1, .9, 9)))
+        ax.vlines(ticks, 0, .035, transform=ax.get_xaxis_transform(),
+                  color=style["reference_color"], lw=.8)
     ax.plot(grid, values, color=style["pdp_color"],
             lw=style["line_width"] + 0.8, label="Average", zorder=6)
     legend = ax.legend(fontsize=style["legend_size"], frameon=False,
@@ -909,7 +942,7 @@ def pdp_with_ice(
     _finish(ax, style,
             title=title if title is not None
             else f"Average {metric_name.lower()} across {feature_name}",
-            xlabel=feature_name, ylabel=metric_name, grid_axis="both")
+            xlabel=feature_name, ylabel=metric_name, grid_axis="y")
     fig.tight_layout()
     return ax
 

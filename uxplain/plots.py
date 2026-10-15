@@ -229,6 +229,7 @@ def generate_pdp_plots(
     kinds: list[str] | None = None,
     feature_names: list[str] | None = None,
     max_ice_lines: int = 80,
+    ice_style: str = "band",
     figsize: tuple[float, float] | None = None,
     show: bool = True,
 ) -> dict:
@@ -244,6 +245,9 @@ def generate_pdp_plots(
         ``"importance"``.
     max_ice_lines : int
         Cap on ICE curves drawn per feature.
+    ice_style : {"band", "lines"}, default="band"
+        Display pointwise central 50% and 90% ICE ranges or individual curves.
+        Bands describe variation across observations, not confidence intervals.
     figsize : tuple, optional
         Size of the whole figure. Scales with the panel count when ``None``.
 
@@ -313,6 +317,7 @@ def generate_pdp_plots(
                          explanation.individual[i], ax=ax,
                          feature_name=_fname(i), metric_name=metric_name,
                          max_lines=max_ice_lines,
+                         ice_style=ice_style,
                          title=f"PDP + ICE — {_fname(i)}" if n > 1 else None)
         _suptitle(fig, f"PDP + ICE — {metric_name}")
         figures["pdp_ice"] = fig

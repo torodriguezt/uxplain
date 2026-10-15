@@ -1,6 +1,6 @@
 """uxplain: explainability for conformal prediction uncertainty."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from uxplain.conformal.cqr_predictor import CQRConformalPredictor
 from uxplain.conformal.crepes_classifier import (
@@ -26,6 +26,7 @@ from uxplain.plotting import (
     STYLE,
     ice_curves,
     importance_bar,
+    importance_plot,
     lime_local,
     pdp_curve,
     pdp_importance,
@@ -78,6 +79,7 @@ __all__ = [
     "coverage_table",
     "ice_curves",
     "importance_bar",
+    "importance_plot",
     "importance_table",
     "lime_local",
     "pdp_curve",

@@ -4,7 +4,7 @@ Real-world labour-force datasets used in the paper's illustrations.
 Two national household surveys, loaded through a small scikit-learn-style
 interface: each loader returns a `sklearn.utils.Bunch` (with ``data``,
 ``target``, ``frame``, ``feature_names``, ``groups``, ``provenance`` and
-``DESCR``), or the ready-to-model ``(X, y)`` pair when called with
+``DESCR``), or the ready-to-estimator ``(X, y)`` pair when called with
 ``return_X_y=True``::
 
     from uxplain.datasets import fetch_pnadc, load_geih

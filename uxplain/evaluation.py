@@ -41,7 +41,7 @@ def _covered_and_size(prediction, y, classes):
     covered = np.zeros(len(y), dtype=bool)
     for i, label in enumerate(y):
         k = position.get(label)
-        # A label the fitted model has never seen cannot be covered.
+        # A label the fitted estimator has never seen cannot be covered.
         covered[i] = k is not None and sets[i, k]
     return covered, sets.sum(axis=1).astype(float)
 
@@ -143,7 +143,7 @@ def importance_table(
         for partial dependence, which then needs ``kind="both"``). Adds
         percentile intervals for the importance and for the rank. The
         intervals describe variability over the explained sample only; they
-        do not account for refitting the model or redrawing the calibration
+        do not account for refitting the estimator or redrawing the calibration
         data.
     level : float, default=0.95
         Coverage of the bootstrap percentile intervals.
