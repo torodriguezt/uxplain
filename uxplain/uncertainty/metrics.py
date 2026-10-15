@@ -11,7 +11,7 @@ Regression metrics reduce ``(lower, upper)`` to a single scalar:
 - ``"upper"``    : ``upper``                   (the optimistic prediction)
 - ``"midpoint"`` : ``(lower + upper) / 2``     (the central prediction)
 
-Classification metrics reduce ``(predict_set, predict_p, predict_proba)``
+Classification metrics reduce ``(predict_set, predict_p_values, predict_proba)``
 to a single scalar per sample:
 
 - ``"set_size"``    : number of classes in the prediction set
@@ -66,11 +66,11 @@ def _set_size(cp, X: np.ndarray, confidence: float) -> np.ndarray:
 
 
 def _credibility(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
-    return cp.predict_p(X).max(axis=1)
+    return cp.predict_p_values(X).max(axis=1)
 
 
 def _conformal_confidence(cp, X: np.ndarray, _confidence: float) -> np.ndarray:
-    p = np.sort(cp.predict_p(X), axis=1)
+    p = np.sort(cp.predict_p_values(X), axis=1)
     if p.shape[1] < 2:
         raise ValueError("The confidence metric requires at least two classes.")
     # 1 - second-highest p-value (well-defined for n_classes >= 2)
@@ -108,7 +108,7 @@ def _check_deterministic_classifier(cp):
 def is_classifier_predictor(cp) -> bool:
     """Return True if ``cp`` exposes the conformal-classifier interface."""
 
-    return hasattr(cp, "predict_set") and hasattr(cp, "predict_p")
+    return hasattr(cp, "predict_set") and hasattr(cp, "predict_p_values")
 
 
 def interval_width(
@@ -189,7 +189,7 @@ def make_uncertainty_function(
     reducer_reg = _REGRESSION_REDUCERS[metric]
 
     def uncertainty_function(X: np.ndarray) -> np.ndarray:
-        lower, upper = conformal_predictor.predict(
+        lower, upper = conformal_predictor.predict_interval(
             X,
             confidence=confidence,
         )
