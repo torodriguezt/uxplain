@@ -17,6 +17,10 @@ Requires Python 3.10 or later.
 pip install uxplain
 ```
 
+The examples below use the development 0.4 API. From this source checkout,
+install it with `python -m pip install -e .`; see the migration notes in
+[CHANGELOG.md](CHANGELOG.md) when updating existing 0.3 scripts.
+
 ## Example
 
 ```python
@@ -29,7 +33,7 @@ X, y = make_regression(n_samples=400, n_features=4, noise=15, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
 pipe = UncertaintyExplanationPipeline(
-    model=RandomForestRegressor(n_estimators=50, random_state=42),
+    estimator=RandomForestRegressor(n_estimators=50, random_state=42),
     uncertainty_metric="width",
     random_state=42,
 )
@@ -37,7 +41,7 @@ pipe.fit(X_train, y_train)
 print(pipe.summary())                # configuration and fitted sample sizes
 print(pipe.evaluate(X_test, y_test))   # empirical coverage and interval width
 
-result = pipe.explain(X_test[:20], show_plots=False)
+result = pipe.explain(X_test[:20])
 print(result.feature_importance())     # which features drive the width
 print(result.to_frame())               # bounds and width for the explained rows
 ```
@@ -58,18 +62,18 @@ X, y = make_classification(
 )
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 classifier = UncertaintyExplanationPipeline(
-    model=RandomForestClassifier(n_estimators=50, random_state=42),
+    estimator=RandomForestClassifier(n_estimators=50, random_state=42),
     uncertainty_metric="set_size",
     random_state=42,
 ).fit(X_train, y_train)
 
-print(pd.DataFrame(classifier.predict_p(X_test[:5]), columns=classifier.classes_))
+print(pd.DataFrame(classifier.predict_p_values(X_test[:5]), columns=classifier.classes_))
 print(classifier.evaluate(X_test, y_test, groups=y_test))
 ```
 
-`predict_p()` returns conformal p-values for classification. Its columns follow
+`predict_p_values()` returns conformal p-values for classification. Its columns follow
 `classes_`; these values are not class probabilities and need not sum to one.
-`predict()` returns a Boolean prediction-set matrix in the same column order.
+`predict_set()` returns a Boolean prediction-set matrix in the same column order.
 
 The pipeline and its components follow scikit-learn conventions
 (`get_params`, `set_params`, `clone`), and custom conformal backends can be
