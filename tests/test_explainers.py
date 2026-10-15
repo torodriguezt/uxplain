@@ -6,7 +6,7 @@ from uxplain import ShapUncertaintyExplainer
 
 
 class InteractionPredictor:
-    def predict(self, X, confidence=0.9):
+    def predict_interval(self, X, confidence=0.9):
         X = np.asarray(X)
         return np.zeros(len(X)), np.exp(X.sum(axis=1))
 

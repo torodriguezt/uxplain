@@ -16,28 +16,28 @@ from uxplain import UncertaintyExplanationPipeline
 class ScaledResidualConformal(BaseEstimator):
     """Split conformal intervals ``m(x) +/- q * s(x)`` around any regressor.
 
-    The point model ``m`` is trained on the first half of the training data,
-    the scale model ``s`` on the absolute residuals of the second half, and
+    The point estimator ``m`` is trained on the first half of the training data,
+    the scale estimator ``s`` on the absolute residuals of the second half, and
     ``q`` is the conformal quantile of the normalized calibration residuals.
     """
 
-    def __init__(self, model, scale_model):
-        self.model = model
-        self.scale_model = scale_model
+    def __init__(self, estimator, scale_estimator):
+        self.estimator = estimator
+        self.scale_estimator = scale_estimator
 
     def fit(self, X_train, y_train, X_calib, y_calib):
         half = len(X_train) // 2
-        self.model_ = clone(self.model).fit(X_train[:half], y_train[:half])
+        self.model_ = clone(self.estimator).fit(X_train[:half], y_train[:half])
         residuals = np.abs(y_train[half:] - self.model_.predict(X_train[half:]))
-        self.scale_model_ = clone(self.scale_model).fit(X_train[half:], residuals)
+        self.scale_estimator_ = clone(self.scale_estimator).fit(X_train[half:], residuals)
         self.scores_ = np.sort(np.abs(y_calib - self.model_.predict(X_calib))
                                / self._scale(X_calib))
         return self
 
     def _scale(self, X):
-        return np.maximum(self.scale_model_.predict(X), 1e-6)
+        return np.maximum(self.scale_estimator_.predict(X), 1e-6)
 
-    def predict(self, X, confidence=0.9):
+    def predict_interval(self, X, confidence=0.9):
         n = len(self.scores_)
         rank = int(np.ceil((n + 1) * confidence))
         q = np.inf if rank > n else self.scores_[rank - 1]
@@ -68,11 +68,11 @@ def test_custom_backend_runs_through_the_pipeline(heteroscedastic):
     assert 0.8 < coverage <= 1.0
 
     result = pipeline.explain(X_test[:20], show_plots=False)
-    assert pipeline.algorithm_used == "exact"  # no shortcut for custom backends
+    assert pipeline.algorithm_used_ == "exact"  # no shortcut for custom backends
     importance = result.feature_importance()
     # The spread depends on the second feature only.
     assert importance.index[0] == "Feature 1"
-    assert pipeline.get_params()["conformal_predictor__scale_model__n_estimators"] == 30
+    assert pipeline.get_params()["conformal_predictor__scale_estimator__n_estimators"] == 30
 
 
 def test_mapie_backend(heteroscedastic):
@@ -99,7 +99,7 @@ def test_mapie_backend(heteroscedastic):
             self.mapie_.conformalize(X_calib, y_calib)
             return self
 
-        def predict(self, X, confidence=0.9):
+        def predict_interval(self, X, confidence=0.9):
             levels = list(self.confidence_levels)
             if confidence not in levels:
                 raise ValueError(f"confidence must be one of {levels}.")

@@ -1,3 +1,4 @@
+from sklearn.exceptions import NotFittedError
 import numpy as np
 import pytest
 from sklearn.dummy import DummyRegressor
@@ -17,8 +18,8 @@ class TestCrepesConformalPredictor:
     )
     def test_fit_predict_shapes(self, method, data):
         cp = CrepesConformalPredictor(Ridge(), method=method)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"])
 
         n = len(data["X_test"])
         assert lower.shape == (n,)
@@ -29,20 +30,20 @@ class TestCrepesConformalPredictor:
     )
     def test_lower_leq_upper(self, method, data):
         cp = CrepesConformalPredictor(Ridge(), method=method)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"])
 
         assert np.all(lower <= upper)
 
     def test_not_fitted_raises(self, data):
         cp = CrepesConformalPredictor(Ridge())
-        with pytest.raises(RuntimeError, match="not fitted"):
-            cp.predict(data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            cp.predict_interval(data["X_test"])
 
     def test_coverage_approximately_nominal(self, data):
         cp = CrepesConformalPredictor(Ridge(), method="normalized")
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"], confidence=0.9)
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"], confidence=0.9)
 
         coverage = np.mean(
             (data["y_test"] >= lower) & (data["y_test"] <= upper)
@@ -52,10 +53,10 @@ class TestCrepesConformalPredictor:
 
     def test_higher_confidence_gives_wider_intervals(self, data):
         cp = CrepesConformalPredictor(Ridge())
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
 
-        lower_90, upper_90 = cp.predict(data["X_test"], confidence=0.90)
-        lower_95, upper_95 = cp.predict(data["X_test"], confidence=0.95)
+        lower_90, upper_90 = cp.predict_interval(data["X_test"], confidence=0.90)
+        lower_95, upper_95 = cp.predict_interval(data["X_test"], confidence=0.95)
 
         width_90 = (upper_90 - lower_90).mean()
         width_95 = (upper_95 - lower_95).mean()
@@ -65,8 +66,8 @@ class TestCrepesConformalPredictor:
         X_train = np.linspace(0, 1, 100).reshape(-1, 1)
         X_calib = np.linspace(0.01, 0.04, 20).reshape(-1, 1)
         cp = CrepesConformalPredictor(Ridge(alpha=0), method="mondrian")
-        cp.fit(X_train, X_train[:, 0], X_calib, X_calib[:, 0])
-        lower, upper = cp.predict(np.array([[0.02], [0.95]]), confidence=0.5)
+        cp.fit(X_train, X_train[:, 0], X_calib=X_calib, y_calib=X_calib[:, 0])
+        lower, upper = cp.predict_interval(np.array([[0.02], [0.95]]), confidence=0.5)
         assert np.isfinite(lower[0]) and np.isfinite(upper[0])
         assert np.isneginf(lower[1]) and np.isposinf(upper[1])
 
@@ -74,11 +75,11 @@ class TestCrepesConformalPredictor:
         X_train = np.arange(100).reshape(-1, 1)
         X_calib = np.arange(100, 300).reshape(-1, 1)
         cp = CrepesConformalPredictor(DummyRegressor(), method="mondrian")
-        cp.fit(X_train, np.zeros(100), X_calib, np.arange(200))
+        cp.fit(X_train, np.zeros(100), X_calib=X_calib, y_calib=np.arange(200))
         X_test = np.arange(50).reshape(-1, 1)
-        first = cp.predict(X_test)
-        np.testing.assert_array_equal(cp.predict(X_test), first)
-        reversed_prediction = cp.predict(X_test[::-1])
+        first = cp.predict_interval(X_test)
+        np.testing.assert_array_equal(cp.predict_interval(X_test), first)
+        reversed_prediction = cp.predict_interval(X_test[::-1])
         np.testing.assert_array_equal(reversed_prediction[0][::-1], first[0])
         np.testing.assert_array_equal(reversed_prediction[1][::-1], first[1])
 
@@ -111,8 +112,8 @@ class TestCrepesConformalPredictor:
 class TestCQRConformalPredictor:
     def test_fit_predict_shapes(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"])
 
         n = len(data["X_test"])
         assert lower.shape == (n,)
@@ -120,28 +121,28 @@ class TestCQRConformalPredictor:
 
     def test_lower_leq_upper(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"])
 
         assert np.all(lower <= upper)
 
     def test_not_fitted_raises(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        with pytest.raises(RuntimeError, match="not fitted"):
-            cp.predict(data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            cp.predict_interval(data["X_test"])
 
     def test_rearrange_sorts_crossed_quantile_models(self, data, quantile_lower, quantile_upper):
         # Swapping the models makes every estimated "lower" quantile the upper one.
         crossed = CQRConformalPredictor(quantile_upper, quantile_lower)
-        crossed.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        crossed.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
         q_low, q_high = crossed._quantiles(data["X_test"])
         assert np.any(q_low > q_high)
 
         sorted_cp = CQRConformalPredictor(quantile_upper, quantile_lower, rearrange=True)
-        sorted_cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        sorted_cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
         q_low, q_high = sorted_cp._quantiles(data["X_test"])
         assert np.all(q_low <= q_high)
-        lower, upper = sorted_cp.predict(data["X_test"])
+        lower, upper = sorted_cp.predict_interval(data["X_test"])
         coverage = np.mean((data["y_test"] >= lower) & (data["y_test"] <= upper))
         assert coverage >= 0.7
 
@@ -159,14 +160,14 @@ class TestCQRConformalPredictor:
         intervals = []
         for rearrange in (False, True):
             cp = CQRConformalPredictor(Shift(-1.0), Shift(1.0), rearrange=rearrange)
-            cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-            intervals.append(cp.predict(data["X_test"]))
+            cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+            intervals.append(cp.predict_interval(data["X_test"]))
         np.testing.assert_allclose(intervals[0], intervals[1])
 
     def test_coverage_approximately_nominal(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, upper = cp.predict(data["X_test"], confidence=0.9)
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, upper = cp.predict_interval(data["X_test"], confidence=0.9)
 
         coverage = np.mean(
             (data["y_test"] >= lower) & (data["y_test"] <= upper)
@@ -175,10 +176,10 @@ class TestCQRConformalPredictor:
 
     def test_higher_confidence_gives_wider_intervals(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
 
-        lower_90, upper_90 = cp.predict(data["X_test"], confidence=0.90)
-        lower_95, upper_95 = cp.predict(data["X_test"], confidence=0.95)
+        lower_90, upper_90 = cp.predict_interval(data["X_test"], confidence=0.90)
+        lower_95, upper_95 = cp.predict_interval(data["X_test"], confidence=0.95)
 
         width_90 = (upper_90 - lower_90).mean()
         width_95 = (upper_95 - lower_95).mean()
@@ -189,11 +190,11 @@ class TestCQRConformalPredictor:
     ):
         """The offset is the ceil((n + 1) * confidence)-th smallest score."""
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
         k = int(np.ceil((len(data["y_calib"]) + 1) * 0.9))
-        lower, _ = cp.predict(data["X_test"], confidence=0.9)
+        lower, _ = cp.predict_interval(data["X_test"], confidence=0.9)
         np.testing.assert_allclose(
-            quantile_lower.predict(data["X_test"]) - lower,
+            cp.lower_estimator_.predict(data["X_test"]) - lower,
             np.sort(cp._scores)[k - 1],
         )
 
@@ -203,8 +204,8 @@ class TestCQRConformalPredictor:
         """With 9 calibration rows, 95% coverage needs an infinite interval."""
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
         cp.fit(data["X_train"], data["y_train"],
-               data["X_calib"][:9], data["y_calib"][:9])
-        lower, upper = cp.predict(data["X_test"], confidence=0.95)
+               X_calib=data["X_calib"][:9], y_calib=data["y_calib"][:9])
+        lower, upper = cp.predict_interval(data["X_test"], confidence=0.95)
         assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
 
     def test_rank_does_not_round_down_above_boundary(
@@ -212,8 +213,8 @@ class TestCQRConformalPredictor:
     ):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
         cp.fit(data["X_train"], data["y_train"],
-               data["X_calib"][:9], data["y_calib"][:9])
-        lower, upper = cp.predict(data["X_test"], confidence=0.9 + 1e-12)
+               X_calib=data["X_calib"][:9], y_calib=data["y_calib"][:9])
+        lower, upper = cp.predict_interval(data["X_test"], confidence=0.9 + 1e-12)
         assert np.all(np.isneginf(lower)) and np.all(np.isposinf(upper))
 
     def test_nonfinite_calibration_target_is_rejected(
@@ -223,7 +224,7 @@ class TestCQRConformalPredictor:
         y_calib = data["y_calib"].copy()
         y_calib[0] = np.nan
         with pytest.raises(ValueError, match="finite"):
-            cp.fit(data["X_train"], data["y_train"], data["X_calib"], y_calib)
+            cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=y_calib)
 
     def test_empty_cqr_set_preserves_signed_endpoints(self):
         class FixedQuantile:
@@ -237,8 +238,8 @@ class TestCQRConformalPredictor:
                 return self.sign * X[:, 0]
 
         cp = CQRConformalPredictor(FixedQuantile(-1), FixedQuantile(1))
-        cp.fit(np.ones((10, 1)), np.zeros(10), np.full((20, 1), 10), np.zeros(20))
-        lower, upper = cp.predict(np.ones((1, 1)))
+        cp.fit(np.ones((10, 1)), np.zeros(10), X_calib=np.full((20, 1), 10), y_calib=np.zeros(20))
+        lower, upper = cp.predict_interval(np.ones((1, 1)))
         np.testing.assert_array_equal(lower, [9.0])
         np.testing.assert_array_equal(upper, [-9.0])
         from uxplain.uncertainty.metrics import make_uncertainty_function
@@ -255,7 +256,7 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier, method=method)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         pred_set = cp.predict_set(classification_data["X_test"], confidence=0.9)
 
@@ -264,13 +265,13 @@ class TestCrepesConformalClassifier:
         assert pred_set.dtype == bool
 
     @pytest.mark.parametrize("method", ["standard", "class_cond", "mondrian"])
-    def test_predict_p_shape_and_range(self, method, classification_data, classifier):
+    def test_predict_p_values_shape_and_range(self, method, classification_data, classifier):
         cp = CrepesConformalClassifier(classifier, method=method)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
-        p = cp.predict_p(classification_data["X_test"])
+        p = cp.predict_p_values(classification_data["X_test"])
 
         n = len(classification_data["X_test"])
         assert p.shape == (n, classification_data["n_classes"])
@@ -280,25 +281,25 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
-        np.testing.assert_array_equal(cp.classes_, classifier.classes_)
+        np.testing.assert_array_equal(cp.classes_, cp.estimator_.classes_)
 
     def test_predict_set_before_fit_raises(self, classification_data, classifier):
         cp = CrepesConformalClassifier(classifier)
-        with pytest.raises(RuntimeError, match="not fitted"):
+        with pytest.raises(NotFittedError, match="not fitted"):
             cp.predict_set(classification_data["X_test"])
 
-    def test_predict_p_before_fit_raises(self, classification_data, classifier):
+    def test_predict_p_values_before_fit_raises(self, classification_data, classifier):
         cp = CrepesConformalClassifier(classifier)
-        with pytest.raises(RuntimeError, match="not fitted"):
-            cp.predict_p(classification_data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            cp.predict_p_values(classification_data["X_test"])
 
     def test_coverage_approximately_nominal(self, classification_data, classifier):
         cp = CrepesConformalClassifier(classifier, method="standard")
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         pred_set = cp.predict_set(classification_data["X_test"], confidence=0.9)
         y_test = classification_data["y_test"]
@@ -310,7 +311,7 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier, method="standard")
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         sizes_80 = cp.predict_set(classification_data["X_test"], confidence=0.80).sum(axis=1)
         sizes_99 = cp.predict_set(classification_data["X_test"], confidence=0.99).sum(axis=1)
@@ -320,11 +321,11 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         proba = cp.predict_proba(classification_data["X_test"])
         np.testing.assert_allclose(
-            proba, classifier.predict_proba(classification_data["X_test"]),
+            proba, cp.estimator_.predict_proba(classification_data["X_test"]),
         )
 
     def test_p_values_deterministic_by_default(self, classification_data, classifier):
@@ -332,14 +333,14 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         X = classification_data["X_test"]
-        p = cp.predict_p(X)
-        np.testing.assert_array_equal(cp.predict_p(X), p)
-        np.testing.assert_array_equal(cp.predict_p(X[::-1])[::-1], p)
+        p = cp.predict_p_values(X)
+        np.testing.assert_array_equal(cp.predict_p_values(X), p)
+        np.testing.assert_array_equal(cp.predict_p_values(X[::-1])[::-1], p)
         np.testing.assert_array_equal(
-            np.vstack([cp.predict_p(row[None, :]) for row in X[:3]]), p[:3],
+            np.vstack([cp.predict_p_values(row[None, :]) for row in X[:3]]), p[:3],
         )
 
     def test_seeded_smoothing_is_not_a_rowwise_function(
@@ -348,11 +349,11 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier, smoothing=True, random_state=42)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         repeated = np.repeat(classification_data["X_test"][:1], 2, axis=0)
-        p = cp.predict_p(repeated)
-        np.testing.assert_array_equal(p, cp.predict_p(repeated))
+        p = cp.predict_p_values(repeated)
+        np.testing.assert_array_equal(p, cp.predict_p_values(repeated))
         assert np.any(p[0] != p[1])  # Same x, different batch positions.
 
     def test_smoothing_is_opt_in(self, classification_data, classifier):
@@ -360,12 +361,12 @@ class TestCrepesConformalClassifier:
         cp = CrepesConformalClassifier(classifier)
         cp.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         X = classification_data["X_test"]
-        p_plain = cp.predict_p(X)
+        p_plain = cp.predict_p_values(X)
         cp.smoothing = True
-        p_smooth = cp.predict_p(X)
+        p_smooth = cp.predict_p_values(X)
         assert np.all(p_smooth <= p_plain)
         assert np.any(p_smooth < p_plain)
 
@@ -375,14 +376,14 @@ class TestCrepesConformalClassifier:
         y_calib[0] = 99
         with pytest.raises(ValueError, match="classes absent"):
             cp.fit(classification_data["X_train"], classification_data["y_train"],
-                   classification_data["X_calib"], y_calib)
+                   X_calib=classification_data["X_calib"], y_calib=y_calib)
 
     def test_absent_calibration_class_has_p_value_one(self, classification_data, classifier):
         cp = CrepesConformalClassifier(classifier, method="class_cond")
         keep = classification_data["y_calib"] != 2
         cp.fit(classification_data["X_train"], classification_data["y_train"],
-               classification_data["X_calib"][keep], classification_data["y_calib"][keep])
-        p = cp.predict_p(classification_data["X_test"])
+               X_calib=classification_data["X_calib"][keep], y_calib=classification_data["y_calib"][keep])
+        p = cp.predict_p_values(classification_data["X_test"])
         np.testing.assert_array_equal(p[:, np.flatnonzero(cp.classes_ == 2)[0]], 1)
 
 
@@ -395,12 +396,12 @@ class TestBackendValidation:
             return CrepesConformalPredictor(Ridge(), method="standard")
 
         flat = make_cp()
-        flat.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+        flat.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
         column = make_cp()
         column.fit(data["X_train"], data["y_train"][:, None],
-                   data["X_calib"], data["y_calib"][:, None])
-        np.testing.assert_allclose(column.predict(data["X_test"]),
-                                   flat.predict(data["X_test"]))
+                   X_calib=data["X_calib"], y_calib=data["y_calib"][:, None])
+        np.testing.assert_allclose(column.predict_interval(data["X_test"]),
+                                   flat.predict_interval(data["X_test"]))
 
     @pytest.mark.parametrize("backend", ["crepes", "cqr"])
     def test_multioutput_targets_are_rejected(self, backend, data):
@@ -408,7 +409,7 @@ class TestBackendValidation:
               else CrepesConformalPredictor(Ridge()))
         with pytest.raises(ValueError, match="single output"):
             cp.fit(data["X_train"], np.column_stack([data["y_train"]] * 2),
-                   data["X_calib"], data["y_calib"])
+                   X_calib=data["X_calib"], y_calib=data["y_calib"])
 
     @pytest.mark.parametrize("backend", ["crepes", "cqr", "classification"])
     @pytest.mark.parametrize("confidence", [0, 1, -0.1, 90, np.nan, np.inf, "0.9"])
@@ -423,15 +424,15 @@ class TestBackendValidation:
                   else CrepesConformalPredictor(Ridge(), method="standard"))
             fit_data = data
         cp.fit(fit_data["X_train"], fit_data["y_train"],
-               fit_data["X_calib"], fit_data["y_calib"])
-        predict = cp.predict_set if backend == "classification" else cp.predict
+               X_calib=fit_data["X_calib"], y_calib=fit_data["y_calib"])
+        predict = cp.predict_set if backend == "classification" else cp.predict_interval
         with pytest.raises(ValueError, match="confidence must be in"):
             predict(fit_data["X_test"], confidence=confidence)
 
     @pytest.mark.parametrize("cp_class", [CrepesConformalPredictor, CrepesConformalClassifier])
     def test_unknown_method_is_rejected(self, cp_class):
         with pytest.raises(ValueError, match="Unknown conformal"):
-            cp_class(Ridge(), method="typo")
+            cp_class(Ridge(), method="typo").fit(np.ones((8, 2)), np.zeros(8), np.ones((4, 2)), np.zeros(4))
 
     @pytest.mark.parametrize("backend", ["crepes", "cqr"])
     def test_empty_calibration_is_rejected(self, backend, data):
@@ -439,4 +440,4 @@ class TestBackendValidation:
               else CrepesConformalPredictor(Ridge()))
         with pytest.raises(ValueError, match="non-empty"):
             cp.fit(data["X_train"], data["y_train"],
-                   data["X_calib"][:0], data["y_calib"][:0])
+                   X_calib=data["X_calib"][:0], y_calib=data["y_calib"][:0])

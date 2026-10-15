@@ -18,7 +18,7 @@ from uxplain.uncertainty.metrics import (
 @pytest.fixture
 def fitted_cp(data):
     cp = CrepesConformalPredictor(Ridge(), method="normalized")
-    cp.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+    cp.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
     return cp
 
 
@@ -27,7 +27,7 @@ def fitted_classifier_cp(classification_data, classifier):
     cp = CrepesConformalClassifier(classifier, method="standard")
     cp.fit(
         classification_data["X_train"], classification_data["y_train"],
-        classification_data["X_calib"], classification_data["y_calib"],
+        X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
     )
     return cp
 
@@ -40,7 +40,7 @@ class TestMakeUncertaintyFunction:
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_unbounded_predictions_cannot_be_explained(self, metric):
         class UnboundedPredictor:
-            def predict(self, X, confidence=0.9):
+            def predict_interval(self, X, confidence=0.9):
                 return np.full(len(X), -np.inf), np.full(len(X), np.inf)
 
         fn = make_uncertainty_function(UnboundedPredictor(), metric=metric)
@@ -49,22 +49,22 @@ class TestMakeUncertaintyFunction:
 
     def test_width_matches_upper_minus_lower(self, fitted_cp, data):
         fn = make_uncertainty_function(fitted_cp, confidence=0.9, metric="width")
-        lower, upper = fitted_cp.predict(data["X_test"], confidence=0.9)
+        lower, upper = fitted_cp.predict_interval(data["X_test"], confidence=0.9)
         np.testing.assert_allclose(fn(data["X_test"]), upper - lower)
 
     def test_lower_matches_lower_bound(self, fitted_cp, data):
         fn = make_uncertainty_function(fitted_cp, confidence=0.9, metric="lower")
-        lower, _ = fitted_cp.predict(data["X_test"], confidence=0.9)
+        lower, _ = fitted_cp.predict_interval(data["X_test"], confidence=0.9)
         np.testing.assert_allclose(fn(data["X_test"]), lower)
 
     def test_upper_matches_upper_bound(self, fitted_cp, data):
         fn = make_uncertainty_function(fitted_cp, confidence=0.9, metric="upper")
-        _, upper = fitted_cp.predict(data["X_test"], confidence=0.9)
+        _, upper = fitted_cp.predict_interval(data["X_test"], confidence=0.9)
         np.testing.assert_allclose(fn(data["X_test"]), upper)
 
     def test_midpoint_matches_average_of_bounds(self, fitted_cp, data):
         fn = make_uncertainty_function(fitted_cp, confidence=0.9, metric="midpoint")
-        lower, upper = fitted_cp.predict(data["X_test"], confidence=0.9)
+        lower, upper = fitted_cp.predict_interval(data["X_test"], confidence=0.9)
         np.testing.assert_allclose(fn(data["X_test"]), (lower + upper) / 2.0)
 
     def test_unknown_metric_raises(self, fitted_cp):
@@ -90,10 +90,10 @@ class TestPipelineMetric:
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_shap(self, data, metric):
         pipeline = UncertaintyExplanationPipeline(
-            model=Ridge(), xai_method="shap", uncertainty_metric=metric,
+            estimator=Ridge(), xai_method="shap", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer_.metric == metric
+        assert pipeline.explainer_.uncertainty_metric == metric
         # Smoke-test that explain() runs end-to-end with the chosen metric
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert result.explanation_values.values.shape[0] == 5
@@ -101,32 +101,32 @@ class TestPipelineMetric:
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_pdp(self, data, metric):
         pipeline = UncertaintyExplanationPipeline(
-            model=Ridge(), xai_method="pdp", uncertainty_metric=metric,
+            estimator=Ridge(), xai_method="pdp", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer_.metric == metric
+        assert pipeline.explainer_.uncertainty_metric == metric
         result = pipeline.explain(data["X_test"][:5], show_plots=False)
         assert result.explanation_values.metric == metric
 
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_lime(self, data, metric):
         pipeline = UncertaintyExplanationPipeline(
-            model=Ridge(),
+            estimator=Ridge(),
             xai_method="lime",
             uncertainty_metric=metric,
             n_lime_samples=50,
         )
         pipeline.fit(data["X_train"], data["y_train"])
-        assert pipeline.explainer_.metric == metric
+        assert pipeline.explainer_.uncertainty_metric == metric
         result = pipeline.explain(data["X_test"][:3], show_plots=False)
         assert result.explanation_values.metric == metric
 
     def test_default_metric_is_width(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge())
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
         assert pipeline.uncertainty_metric is None  # the parameter is stored as given
         pipeline.fit(data["X_train"], data["y_train"])
         assert pipeline.uncertainty_metric_ == "width"
-        assert pipeline.explainer_.metric == "width"
+        assert pipeline.explainer_.uncertainty_metric == "width"
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ class TestClassificationMetrics:
             def predict_set(self, X, confidence=0.9):
                 return np.ones((len(X), 1), dtype=bool)
 
-            def predict_p(self, X):
+            def predict_p_values(self, X):
                 return np.ones((len(X), 1))
 
         fn = make_uncertainty_function(SingleClassPredictor(), metric="confidence")
@@ -193,7 +193,7 @@ class TestClassificationMetrics:
             fitted_classifier_cp, confidence=0.9, metric="credibility",
         )
         actual = fn(classification_data["X_test"])
-        expected = fitted_classifier_cp.predict_p(
+        expected = fitted_classifier_cp.predict_p_values(
             classification_data["X_test"],
         ).max(axis=1)
         np.testing.assert_allclose(actual, expected)
@@ -215,7 +215,7 @@ class TestClassificationMetrics:
         )
         actual = fn(classification_data["X_test"])
         p_sorted = np.sort(
-            fitted_classifier_cp.predict_p(classification_data["X_test"]), axis=1,
+            fitted_classifier_cp.predict_p_values(classification_data["X_test"]), axis=1,
         )
         expected = 1.0 - p_sorted[:, -2]
         np.testing.assert_allclose(actual, expected)
@@ -252,10 +252,10 @@ class TestClassificationPipelineMetric:
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
         X = classification_data["X_test"][:2]
-        assert pipeline.predict(X).shape == (2, classification_data["n_classes"])
+        assert pipeline.predict_set(X).shape == (2, classification_data["n_classes"])
         with pytest.raises(ValueError, match="require smoothing=False"):
             pipeline.explain(X, show_plots=False)
 
@@ -264,7 +264,7 @@ class TestClassificationPipelineMetric:
     )
     def test_pipeline_propagates_metric(self, classification_data, classifier, metric):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier,
+            estimator=classifier,
             task="classification",
             uncertainty_metric=metric,
             xai_method="shap",
@@ -273,7 +273,7 @@ class TestClassificationPipelineMetric:
             classification_data["X_train"], classification_data["y_train"],
         )
         assert pipeline.uncertainty_metric_ == metric
-        assert pipeline.explainer_.metric == metric
+        assert pipeline.explainer_.uncertainty_metric == metric
         result = pipeline.explain(
             classification_data["X_test"][:5], show_plots=False,
         )
@@ -283,24 +283,24 @@ class TestClassificationPipelineMetric:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
         )
         pipeline.fit(classification_data["X_train"], classification_data["y_train"])
         assert pipeline.uncertainty_metric_ == "set_size"
-        assert pipeline.explainer_.metric == "set_size"
+        assert pipeline.explainer_.uncertainty_metric == "set_size"
 
     def test_invalid_classification_metric_raises(self, classifier):
         with pytest.raises(ValueError, match="not valid for classification"):
             UncertaintyExplanationPipeline(
-                model=classifier,
+                estimator=classifier,
                 task="classification",
                 uncertainty_metric="width",
-            )
+            ).fit(np.ones((8, 2)), np.zeros(8))
 
     def test_margin_rejected_at_pipeline_level(self, classifier):
         with pytest.raises(ValueError, match="not valid for classification"):
             UncertaintyExplanationPipeline(
-                model=classifier,
+                estimator=classifier,
                 task="classification",
                 uncertainty_metric="margin",
-            )
+            ).fit(np.ones((8, 2)), np.zeros(8))

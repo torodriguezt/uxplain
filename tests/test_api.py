@@ -1,3 +1,4 @@
+from sklearn.exceptions import NotFittedError
 """Fitted-object API: scikit-learn conventions, summaries, results and explanations."""
 
 import matplotlib
@@ -41,7 +42,7 @@ def _cqr_pipeline(**kwargs):
 
 class TestScikitLearnConventions:
     def test_constructor_stores_parameters_unchanged(self):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge())
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
         params = pipeline.get_params(deep=False)
         assert params["task"] == "auto"
         assert params["uncertainty_metric"] is None
@@ -51,36 +52,36 @@ class TestScikitLearnConventions:
     def test_nested_parameters_reach_components(self):
         pipeline = _cqr_pipeline()
         params = pipeline.get_params()
-        assert params["conformal_predictor__lower_model__alpha"] == 0.05
-        pipeline.set_params(conformal_predictor__lower_model__alpha=0.1)
-        assert pipeline.conformal_predictor.lower_model.alpha == 0.1
+        assert params["conformal_predictor__lower_estimator__alpha"] == 0.05
+        pipeline.set_params(conformal_predictor__lower_estimator__alpha=0.1)
+        assert pipeline.conformal_predictor.lower_estimator.alpha == 0.1
 
     def test_clone_returns_unfitted_copy_with_same_parameters(self, data):
         pipeline = _cqr_pipeline().fit(data["X_train"], data["y_train"])
         copy = clone(pipeline)
         assert not hasattr(copy, "conformal_predictor_")
-        with pytest.raises(RuntimeError, match="not fitted"):
-            copy.predict(data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            copy.predict_interval(data["X_test"])
         copy.fit(data["X_train"], data["y_train"])
-        np.testing.assert_allclose(copy.predict(data["X_test"]),
-                                   pipeline.predict(data["X_test"]))
+        np.testing.assert_allclose(copy.predict_interval(data["X_test"]),
+                                   pipeline.predict_interval(data["X_test"]))
 
     def test_fit_does_not_modify_supplied_components(self, data):
-        model = Ridge()
-        pipeline = UncertaintyExplanationPipeline(model=model, random_state=0)
+        estimator = Ridge()
+        pipeline = UncertaintyExplanationPipeline(estimator=estimator, random_state=0)
         pipeline.fit(data["X_train"], data["y_train"])
-        assert not hasattr(model, "coef_")
-        assert pipeline.conformal_predictor_.model is not model
-        assert hasattr(pipeline.conformal_predictor_.model, "coef_")
+        assert not hasattr(estimator, "coef_")
+        assert pipeline.conformal_predictor_.estimator is not estimator
+        assert hasattr(pipeline.conformal_predictor_.estimator_, "coef_")
 
     def test_set_params_is_validated_at_fit(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge())
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
         pipeline.set_params(uncertainty_metric="set_size")
         with pytest.raises(ValueError, match="not valid for regression"):
             pipeline.fit(data["X_train"], data["y_train"])
 
     def test_set_params_changes_the_fitted_pipeline(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge(), random_state=0)
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), random_state=0)
         pipeline.set_params(confidence=0.5).fit(data["X_train"], data["y_train"])
         narrow = pipeline.evaluate(data["X_test"], data["y_test"])
         pipeline.set_params(confidence=0.95).fit(data["X_train"], data["y_train"])
@@ -88,7 +89,7 @@ class TestScikitLearnConventions:
         assert wide.loc["overall", "mean_size"] > narrow.loc["overall", "mean_size"]
 
     def test_repr_lists_parameters(self):
-        text = repr(UncertaintyExplanationPipeline(model=Ridge(), xai_method="pdp"))
+        text = repr(UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="pdp"))
         assert text.startswith("UncertaintyExplanationPipeline(")
         assert "xai_method='pdp'" in text
         assert "object at 0x" not in text
@@ -97,7 +98,7 @@ class TestScikitLearnConventions:
         CQRConformalPredictor(Ridge(), Ridge(), rearrange=True),
         CrepesConformalPredictor(Ridge(), method="mondrian"),
         CrepesConformalClassifier(RandomForestClassifier(), method="class_cond"),
-        ShapUncertaintyExplainer(None, metric="midpoint", background_size=50),
+        ShapUncertaintyExplainer(None, uncertainty_metric="midpoint", background_size=50),
         LimeUncertaintyExplainer(None, n_lime_samples=10),
         PDPUncertaintyExplainer(None, grid_resolution=7),
     ])
@@ -109,7 +110,7 @@ class TestScikitLearnConventions:
 
     def test_fitted_attributes(self, data):
         frame = pd.DataFrame(data["X_train"], columns=list("abcd"))
-        pipeline = UncertaintyExplanationPipeline(model=Ridge()).fit(frame, data["y_train"])
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge()).fit(frame, data["y_train"])
         assert pipeline.task_ == "regression"
         assert pipeline.uncertainty_metric_ == "width"
         assert pipeline.conformal_method_ == "normalized"
@@ -118,7 +119,7 @@ class TestScikitLearnConventions:
         assert pipeline.n_train_ + pipeline.n_calibration_ == len(frame)
 
     def test_cp_alias_is_deprecated(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge())
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.warns(FutureWarning, match="conformal_predictor_"):
             assert pipeline.cp is pipeline.conformal_predictor_
@@ -142,19 +143,19 @@ class TestSummaryAndPrediction:
 
     def test_classification_summary_and_p_values(self, classification_data, classifier):
         d = classification_data
-        pipeline = UncertaintyExplanationPipeline(model=classifier, random_state=0)
-        pipeline.fit(d["X_train"], d["y_train"], d["X_calib"], d["y_calib"])
-        p_values = pipeline.predict_p(d["X_test"])
+        pipeline = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
+        pipeline.fit(d["X_train"], d["y_train"], X_calib=d["X_calib"], y_calib=d["y_calib"])
+        p_values = pipeline.predict_p_values(d["X_test"])
         assert p_values.shape == (len(d["X_test"]), len(pipeline.classes_))
-        sets = pipeline.predict(d["X_test"])
+        sets = pipeline.predict_set(d["X_test"])
         np.testing.assert_array_equal(sets, p_values >= 1 - pipeline.confidence)
         assert pipeline.summary()["classes"] == 3
 
-    def test_predict_p_is_classification_only(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge())
+    def test_predict_p_values_is_classification_only(self, data):
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(AttributeError, match="classification"):
-            pipeline.predict_p(data["X_test"])
+            pipeline.predict_p_values(data["X_test"])
 
 
 class TestExplanationClasses:
@@ -165,7 +166,7 @@ class TestExplanationClasses:
     ])
     def test_common_interface(self, data, xai_method, kind, extra):
         pipeline = UncertaintyExplanationPipeline(
-            model=Ridge(), xai_method=xai_method, n_lime_samples=50, random_state=0,
+            estimator=Ridge(), xai_method=xai_method, n_lime_samples=50, random_state=0,
         ).fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
         X = pd.DataFrame(data["X_test"][:6], columns=list("abcd"))
         result = pipeline.explain(X, show_plots=False, **extra)
@@ -203,7 +204,7 @@ class TestExplanationClasses:
         assert result.to_frame().columns.tolist() == ["lower", "upper", "width"]
 
         d = classification_data
-        classification = UncertaintyExplanationPipeline(model=classifier, random_state=0)
+        classification = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
         classification.fit(d["X_train"], d["y_train"])
         outcome = classification.explain(d["X_test"][:4], show_plots=False)
         assert repr(outcome).startswith("ClassificationExplanationResult(rows=4, classes=3")

@@ -85,13 +85,13 @@ def cqr_pipeline(data, quantile_lower, quantile_upper):
     pipeline = UncertaintyExplanationPipeline(
         conformal_predictor=CQRConformalPredictor(quantile_lower, quantile_upper),
     )
-    return pipeline.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+    return pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
 
 
 class TestPipelineAccessors:
     def test_evaluate_regression(self, data, cqr_pipeline):
         table = cqr_pipeline.evaluate(data["X_test"], data["y_test"])
-        lower, upper = cqr_pipeline.predict(data["X_test"])
+        lower, upper = cqr_pipeline.predict_interval(data["X_test"])
         expected = np.mean((lower <= data["y_test"]) & (data["y_test"] <= upper))
         assert table.loc["overall", "coverage"] == pytest.approx(expected)
         assert table.loc["overall", "n"] == len(data["y_test"])
@@ -99,10 +99,10 @@ class TestPipelineAccessors:
     def test_evaluate_classification_by_class(self, classification_data):
         d = classification_data
         pipeline = UncertaintyExplanationPipeline(
-            model=RandomForestClassifier(n_estimators=20, random_state=0),
+            estimator=RandomForestClassifier(n_estimators=20, random_state=0),
             task="classification",
         )
-        pipeline.fit(d["X_train"], d["y_train"], d["X_calib"], d["y_calib"])
+        pipeline.fit(d["X_train"], d["y_train"], X_calib=d["X_calib"], y_calib=d["y_calib"])
         table = pipeline.evaluate(d["X_test"], d["y_test"], groups=d["y_test"])
         assert table.index.tolist() == ["overall", 0, 1, 2]
         assert table.loc[[0, 1, 2], "n"].sum() == len(d["y_test"])
@@ -113,10 +113,10 @@ class TestPipelineAccessors:
             cqr_pipeline.classes_
 
     def test_fast_path_flags_are_public(self, data, cqr_pipeline):
-        assert cqr_pipeline.used_fast_path is None
+        assert cqr_pipeline.used_fast_path_ is None
         cqr_pipeline.explain(data["X_test"][:5], show_plots=False)
-        assert cqr_pipeline.used_fast_path is True
-        assert cqr_pipeline.algorithm_used == "tree"
+        assert cqr_pipeline.used_fast_path_ is True
+        assert cqr_pipeline.algorithm_used_ == "tree"
 
     def test_result_importance(self, data, cqr_pipeline):
         result = cqr_pipeline.explain(data["X_test"][:10], show_plots=False)
@@ -127,7 +127,7 @@ class TestPipelineAccessors:
         assert {"ci_lower", "ci_upper", "rank_lower", "rank_upper"} <= set(table)
 
     def test_pdp_importance_bootstrap_needs_ice(self, data):
-        pipeline = UncertaintyExplanationPipeline(model=Ridge(), xai_method="pdp")
+        pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="pdp")
         pipeline.fit(data["X_train"], data["y_train"])
         averaged = pipeline.explain(data["X_test"], show_plots=False, kind="average")
         with pytest.raises(ValueError, match="ICE"):
@@ -157,8 +157,8 @@ def test_gradient_boosting_cqr_reports_exact_algorithm_for_generic_path(data):
         GradientBoostingRegressor(loss="quantile", alpha=0.05, n_estimators=10),
         GradientBoostingRegressor(loss="quantile", alpha=0.95, n_estimators=10),
     )
-    pipeline = UncertaintyExplanationPipeline(conformal_predictor=cp, fast_shap=False)
-    pipeline.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
+    pipeline = UncertaintyExplanationPipeline(conformal_predictor=cp, fast_path=False)
+    pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
     pipeline.explain(data["X_test"][:3], show_plots=False)
-    assert pipeline.used_fast_path is False
-    assert pipeline.algorithm_used == "exact"
+    assert pipeline.used_fast_path_ is False
+    assert pipeline.algorithm_used_ == "exact"
