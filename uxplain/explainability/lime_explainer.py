@@ -11,7 +11,9 @@ from lime.lime_tabular import LimeTabularExplainer
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
+from sklearn.utils.validation import check_is_fitted
 
+from ..conformal._validation import remember_features
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
 from .base import UncertaintyExplanation
@@ -78,17 +80,18 @@ class LimeUncertaintyExplainer(BaseEstimator):
 
     def __init__(
         self,
-        cp: ConformalPredictorProtocol,
+        conformal_predictor: ConformalPredictorProtocol | None = None,
+        *,
         confidence: float = 0.9,
         n_lime_samples: int = 5000,
         feature_names: list[str] | None = None,
         random_state: int | None = None,
-        metric: UncertaintyMetric = "width",
+        uncertainty_metric: UncertaintyMetric = "width",
     ):
         """
         Parameters
         ----------
-        cp
+        conformal_predictor
             Fitted conformal predictor.
 
         confidence : float
@@ -107,49 +110,38 @@ class LimeUncertaintyExplainer(BaseEstimator):
             Seed for LIME's perturbation sampling. Set for
             reproducible coefficients across runs.
 
-        metric : str
+        uncertainty_metric : str
             Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
             ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
             or ``"confidence"`` for classification.
         """
 
-        self.cp = cp
+        self.conformal_predictor = conformal_predictor
         self.confidence = confidence
         self.n_lime_samples = n_lime_samples
         self.feature_names = feature_names
         self.random_state = random_state
-        self.metric = metric
+        self.uncertainty_metric = uncertainty_metric
 
-        self._lime_explainer: LimeTabularExplainer | None = None
-        self._target_fn = None
-        self._n_features: int | None = None
 
-    def fit(
-        self,
-        X_background: np.ndarray,
-        **_,
-    ) -> None:
+    def fit(self, X, y=None):
+        """Prepare the explainer on reference observations and return self.
+
+        Configure the explanation through the constructor or ``set_params``.
+        ``y`` is accepted for compatibility and is ignored.
         """
-        Build LIME explainer from background data.
-
-        Parameters
-        ----------
-        X_background : np.ndarray
-            Training / background data used to infer feature
-            distributions for perturbation.
-        **_
-            Additional keyword arguments are accepted and ignored.
-
-        Returns
-        -------
-        None
-            Initializes the perturbation model and the scalar target function.
-        """
-
+        self.fitted_ = False
+        if self.conformal_predictor is None:
+            raise ValueError("A fitted conformal_predictor is required.")
+        X_background = X
+        self._feature_names = self.feature_names
+        if self._feature_names is None and hasattr(X, "columns"):
+            self._feature_names = list(X.columns)
+        remember_features(self, X if hasattr(X, "shape") else np.asarray(X))
         X_background = np.asarray(X_background)
         self._n_features = X_background.shape[1]
 
-        fnames = self.feature_names or [str(i) for i in range(self._n_features)]
+        fnames = self._feature_names or [str(i) for i in range(self._n_features)]
 
         self._lime_explainer = LimeTabularExplainer(
             X_background,
@@ -158,8 +150,11 @@ class LimeUncertaintyExplainer(BaseEstimator):
             random_state=self.random_state,
         )
         self._target_fn = make_uncertainty_function(
-            self.cp, self.confidence, metric=self.metric,
+            self.conformal_predictor, self.confidence, metric=self.uncertainty_metric,
         )
+
+        self.fitted_ = True
+        return self
 
     def explain(
         self,
@@ -179,12 +174,11 @@ class LimeUncertaintyExplainer(BaseEstimator):
             Contains per-sample LIME coefficients.
         """
 
-        if self._lime_explainer is None:
-            raise RuntimeError("Explainer not fitted. Call fit() first.")
+        check_is_fitted(self)
 
         X = np.asarray(X)
         n_samples = X.shape[0]
-        fnames = self.feature_names or [str(i) for i in range(self._n_features)]
+        fnames = self._feature_names or [str(i) for i in range(self._n_features)]
 
         coefficients = np.zeros((n_samples, self._n_features))
         raw_exps = []
@@ -204,6 +198,9 @@ class LimeUncertaintyExplainer(BaseEstimator):
         return LIMEExplanation(
             feature_names=fnames,
             local_coefficients=coefficients,
-            metric=self.metric,
+            metric=self.uncertainty_metric,
             raw_explanations=raw_exps,
         )
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "fitted_", False)

@@ -49,7 +49,7 @@ class UncertaintyExplanation:
             Number of bootstrap resamples of explained rows. For partial
             dependence, requires ICE curves from ``explain(..., kind="both")``.
             Intervals describe variability over these rows only, excluding
-            model refitting or redrawing calibration data.
+            estimator refitting or redrawing calibration data.
         level : float, default=0.95
             Coverage of bootstrap percentile intervals, between zero and one.
         random_state : int, optional
