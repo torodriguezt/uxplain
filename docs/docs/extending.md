@@ -4,27 +4,28 @@ Pass a custom `conformal_predictor` to `UncertaintyExplanationPipeline` to expla
 the intervals or sets produced by another conformal library. The pipeline clones
 the backend, gives it separate training and calibration arrays, and connects the
 fitted backend to the selected explainer. The custom predictor takes precedence
-over `model` and `conformal_method`.
+over `estimator` and `conformal_method`.
 
 ## Backend contracts
 
 The protocols describe structural interfaces: a backend does not need to inherit
-from them. Inputs are NumPy arrays with shape `(n_samples, n_features)` for `X`
-and `(n_samples,)` for `y`.
+from them. Inputs have shape `(n_samples, n_features)` for `X`
+and `(n_samples,)` for `y`. Training DataFrames retain their column names;
+explainers may supply NumPy arrays containing masked numeric rows.
 
 | Backend | Required members | Output |
 | --- | --- | --- |
 | Regression | `fit(X_train, y_train, X_calib, y_calib)` | Fit using the separate training and calibration samples. |
-| Regression | `predict(X, confidence=0.9)` | `(lower, upper)`, two arrays of shape `(n_samples,)`. |
+| Regression | `predict_interval(X, confidence=0.9)` | `(lower, upper)`, two arrays of shape `(n_samples,)`. |
 | Classification | `fit(X_train, y_train, X_calib, y_calib)` | Fit and set `classes_`. |
 | Classification | `predict_set(X, confidence=0.9)` | Boolean array of shape `(n_samples, n_classes)`. |
-| Classification | `predict_p(X)` | Conformal p-values of shape `(n_samples, n_classes)`. |
+| Classification | `predict_p_values(X)` | Conformal p-values of shape `(n_samples, n_classes)`. |
 | Classification | `classes_` | Class labels in the exact column order of both outputs. |
 
 See [`ConformalPredictorProtocol`](api.md#uxplain.ConformalPredictorProtocol) and
 [`ConformalClassifierProtocol`](api.md#uxplain.ConformalClassifierProtocol).
 Classification is detected from the presence of both `predict_set` and
-`predict_p`; use `task="classification"` or `task="regression"` to set it explicitly.
+`predict_p_values`; use `task="classification"` or `task="regression"` to set it explicitly.
 
 Inherit from scikit-learn's `BaseEstimator` and store constructor arguments
 unchanged to support `get_params()`, `set_params()` and `clone()`. Otherwise the
@@ -87,7 +88,7 @@ class MapieConformalRegressor(BaseEstimator):
         self.mapie_.conformalize(X_calib, y_calib)
         return self
 
-    def predict(self, X, confidence=0.9):
+    def predict_interval(self, X, confidence=0.9):
         levels = list(self.confidence_levels)
         if confidence not in levels:
             raise ValueError(f"confidence must be one of {levels}.")
@@ -115,7 +116,7 @@ pipeline = UncertaintyExplanationPipeline(
 
 print(pipeline.summary())
 print(pipeline.evaluate(X_test, y_test))
-result = pipeline.explain(X_test[:20], show_plots=False)
+result = pipeline.explain(X_test[:20])
 print(result.to_frame())
 print(result.feature_importance())
 
@@ -131,7 +132,7 @@ training sample, and `conformalize()` sees only the calibration sample. Keep the
 test sample independent of both.
 
 Custom backends use the generic SHAP path. With the three features in this
-example, `pipeline.algorithm_used` is `"exact"`; this means exact SHAP evaluation
+example, `pipeline.algorithm_used_` is `"exact"`; this means exact SHAP evaluation
 of the composed summary, rather than the TreeSHAP shortcut used by some built-in
 backends. Evaluation reports empirical coverage on the selected test sample;
 the backend's statistical guarantees still depend on its conformal method and
@@ -141,11 +142,11 @@ the data assumptions.
 
 Pass an object implementing
 [`UncertaintyExplainerProtocol`](api.md#uxplain.UncertaintyExplainerProtocol) as
-`explainer=`. It needs `fit(X_background, **kwargs)` and `explain(X)`. The pipeline
-clones the object; if it has a `cp` attribute, that attribute is bound to the
-fitted conformal predictor. Additional keyword arguments to `pipeline.explain()`
-are forwarded to the explainer's `fit()` method, which is run when the explainer
-is first used and when those arguments change.
+`explainer=`. It needs `fit(X, y=None)` and `explain(X)`. The pipeline
+clones the object; if it has a `conformal_predictor` attribute, that attribute is bound to the
+fitted conformal predictor. Configure the explainer through its constructor or nested `set_params`
+parameters before fitting the pipeline. Its `fit` method returns itself,
+and its `explain` method computes without plotting.
 
 Return a subclass of
 [`UncertaintyExplanation`](api.md#uxplain.UncertaintyExplanation) so the result
@@ -158,7 +159,7 @@ calculation. The built-in importance helper supports SHAP, LIME and PDP.
 
 A custom explainer controls its own target and nominal coverage. Configure these
 consistently with the pipeline: `xai_method` and `uncertainty_metric` do not
-reconfigure a supplied explainer, and only its `cp` attribute is automatically
+reconfigure a supplied explainer, and only its `conformal_predictor` attribute is automatically
 rebound. Keep explanatory summaries distinct from the coverage of the underlying
 prediction intervals or sets.
 

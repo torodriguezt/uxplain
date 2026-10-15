@@ -7,6 +7,7 @@ for interval prediction.
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import Literal
 
 from crepes import WrapRegressor
@@ -15,9 +16,10 @@ from crepes.extras import (
     MondrianCategorizer,
 )
 import numpy as np
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.utils.validation import check_is_fitted
 
-from ._validation import check_confidence, check_fit_data
+from ._validation import check_confidence, check_fit_data, prediction_frame, remember_features
 
 ConformalMethod = Literal[
     "standard",
@@ -47,13 +49,13 @@ class _DeterministicMondrianCategorizer(MondrianCategorizer):
         return np.searchsorted(self.bin_thresholds[1:-1], scores, side="left")
 
 
-class CrepesConformalPredictor(BaseEstimator):
+class CrepesConformalPredictor(RegressorMixin, BaseEstimator):
     """
     Wrapper for conformal regression using crepes.
 
     Parameters
     ----------
-    model : object
+    estimator : object
         Any sklearn-compatible regressor.
     method : ConformalMethod, default="normalized"
         Conformal prediction method to use:
@@ -64,29 +66,28 @@ class CrepesConformalPredictor(BaseEstimator):
         - "mondrian": uses a MondrianCategorizer for
           group-conditional coverage
         - "normalized_mondrian": combines both
+    n_neighbors : int, default=25
+        Neighbors used to estimate difficulty for normalized methods. Capped at
+        the number of proper training observations when that sample is smaller.
     """
 
     def __init__(
         self,
-        model,
+        estimator,
+        *,
         method: ConformalMethod = "normalized",
+        n_neighbors: int = 25,
     ):
-        if method not in ("standard", "normalized", "mondrian", "normalized_mondrian"):
-            raise ValueError(f"Unknown conformal regression method '{method}'.")
-        self.model = model
+        self.estimator = estimator
         self.method = method
-        self.wrapper = None
-        self.difficulty_estimator = None
-        self.mondrian_categorizer = None
-        self._calibration_bins = None
+        self.n_neighbors = n_neighbors
 
     def fit(
         self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-        **kwargs,
     ):
         """
         Fit the regressor and calibrate conformal prediction intervals.
@@ -96,16 +97,14 @@ class CrepesConformalPredictor(BaseEstimator):
 
         Parameters
         ----------
-        X_train : array-like of shape (n_train, n_features)
+        X : array-like of shape (n_train, n_features)
             Features used to fit the regressor and any auxiliary estimators.
-        y_train : array-like of shape (n_train,)
+        y : array-like of shape (n_train,)
             Training target values.
         X_calib : array-like of shape (n_calib, n_features)
-            Held-out calibration features with the same columns as `X_train`.
+            Held-out calibration features with the same columns as `X`.
         y_calib : array-like of shape (n_calib,)
             Calibration target values used to compute conformity scores.
-        **kwargs : dict
-            Additional keyword arguments are accepted and ignored.
 
         Returns
         -------
@@ -113,48 +112,57 @@ class CrepesConformalPredictor(BaseEstimator):
             The fitted and calibrated predictor.
         """
 
-        self.wrapper = None
-        self.difficulty_estimator = None
-        self.mondrian_categorizer = None
+        if self.method not in ("standard", "normalized", "mondrian", "normalized_mondrian"):
+            raise ValueError(f"Unknown conformal regression method '{self.method}'.")
+        if isinstance(self.n_neighbors, bool) or not isinstance(self.n_neighbors, Integral) or self.n_neighbors < 1:
+            raise ValueError("n_neighbors must be a positive integer.")
+        self._is_fitted = False
+        self.wrapper_ = None
+        self.difficulty_estimator_ = None
+        self.mondrian_categorizer_ = None
         self._calibration_bins = None
-        X_train, y_train, X_calib, y_calib = check_fit_data(
-            X_train, y_train, X_calib, y_calib,
+        X, y, X_calib, y_calib = check_fit_data(
+            X, y, X_calib, y_calib,
         )
 
+        remember_features(self, X)
+        self.estimator_ = clone(self.estimator, safe=False)
         # Train
-        self.model.fit(
-            X_train,
-            y_train,
+        self.estimator_.fit(
+            X,
+            y,
         )
 
         # Build calibration kwargs based on method
         calibrate_kwargs = {}
 
         if self.method in ("normalized", "normalized_mondrian"):
-            self.difficulty_estimator = DifficultyEstimator()
-            self.difficulty_estimator.fit(X_train, y=y_train)
-            calibrate_kwargs["de"] = self.difficulty_estimator
+            self.difficulty_estimator_ = DifficultyEstimator()
+            self.n_neighbors_ = min(self.n_neighbors, len(X))
+            self.difficulty_estimator_.fit(X, y=y, k=self.n_neighbors_)
+            calibrate_kwargs["de"] = self.difficulty_estimator_
 
         if self.method in ("mondrian", "normalized_mondrian"):
-            self.mondrian_categorizer = _DeterministicMondrianCategorizer()
-            mc_kwargs = {"de": self.difficulty_estimator} if self.method == "normalized_mondrian" else {"f": self.model.predict}
-            self.mondrian_categorizer.fit(X_train, **mc_kwargs)
-            calibrate_kwargs["mc"] = self.mondrian_categorizer
-            self._calibration_bins = np.unique(self.mondrian_categorizer.apply(X_calib))
+            self.mondrian_categorizer_ = _DeterministicMondrianCategorizer()
+            mc_kwargs = {"de": self.difficulty_estimator_} if self.method == "normalized_mondrian" else {"f": self.estimator_.predict}
+            self.mondrian_categorizer_.fit(X, **mc_kwargs)
+            calibrate_kwargs["mc"] = self.mondrian_categorizer_
+            self._calibration_bins = np.unique(self.mondrian_categorizer_.apply(X_calib))
 
-        self.wrapper = WrapRegressor(
-            self.model
+        self.wrapper_ = WrapRegressor(
+            self.estimator_
         )
 
         # Calibrate
-        self.wrapper.calibrate(
+        self.wrapper_.calibrate(
             X_calib,
             y_calib,
             **calibrate_kwargs,
         )
+        self._is_fitted = True
         return self
 
-    def predict(
+    def predict_interval(
         self,
         X: np.ndarray,
         confidence: float = 0.9,
@@ -179,19 +187,18 @@ class CrepesConformalPredictor(BaseEstimator):
             receives an unbounded interval with endpoints `(-inf, inf)`.
         """
 
-        if self.wrapper is None:
-            raise RuntimeError("CrepesConformalPredictor not fitted.")
+        check_is_fitted(self)
 
         check_confidence(confidence)
-        X = np.asarray(X)
+        X = prediction_frame(self, X)
 
-        intervals = self.wrapper.predict_int(
+        intervals = self.wrapper_.predict_int(
             X,
             confidence=confidence,
         )
 
-        if self.mondrian_categorizer is not None:
-            bins = self.mondrian_categorizer.apply(X)
+        if self.mondrian_categorizer_ is not None:
+            bins = self.mondrian_categorizer_.apply(X)
             uncalibrated = ~np.isin(bins, self._calibration_bins)
             # No finite group quantile exists without calibration observations.
             # Some crepes versions otherwise leave these intervals at [0, 0].
@@ -202,3 +209,11 @@ class CrepesConformalPredictor(BaseEstimator):
         upper = intervals[:, 1]
 
         return lower, upper
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "_is_fitted", False)
+
+    def predict(self, X):
+        """Return point predictions from the fitted base estimator."""
+        check_is_fitted(self)
+        return self.estimator_.predict(prediction_frame(self, X))

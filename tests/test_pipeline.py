@@ -1,3 +1,4 @@
+from sklearn.exceptions import NotFittedError
 import matplotlib
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ matplotlib.use("Agg")
 
 def _make_pipeline(xai_method="shap", **kwargs):
     return UncertaintyExplanationPipeline(
-        model=Ridge(),
+        estimator=Ridge(),
         xai_method=xai_method,
         **kwargs,
     )
@@ -41,21 +42,21 @@ def _make_pipeline(xai_method="shap", **kwargs):
 class TestInit:
     def test_invalid_task_is_rejected(self):
         with pytest.raises(ValueError, match="Unknown task"):
-            UncertaintyExplanationPipeline(model=Ridge(), task="clasification")
+            UncertaintyExplanationPipeline(estimator=Ridge(), task="clasification").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_requires_model_or_conformal_predictor(self):
-        with pytest.raises(ValueError, match="model.*conformal_predictor"):
-            UncertaintyExplanationPipeline()
+        with pytest.raises(ValueError, match="estimator.*conformal_predictor"):
+            UncertaintyExplanationPipeline().fit(np.ones((8, 2)), np.zeros(8))
 
     def test_invalid_xai_method_raises(self):
         with pytest.raises(ValueError, match="Unknown xai_method"):
-            UncertaintyExplanationPipeline(model=Ridge(), xai_method="unknown")
+            UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="unknown").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_custom_conformal_predictor_accepted(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
         pipeline = UncertaintyExplanationPipeline(conformal_predictor=cp)
-        pipeline.fit(data["X_train"], data["y_train"], data["X_calib"], data["y_calib"])
-        lower, _ = pipeline.predict(data["X_test"])
+        pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
+        lower, _ = pipeline.predict_interval(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
 
@@ -66,19 +67,19 @@ class TestInit:
 class TestFitPredict:
     def test_predict_before_fit_raises(self, data):
         pipeline = _make_pipeline()
-        with pytest.raises(RuntimeError, match="not fitted"):
-            pipeline.predict(data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            pipeline.predict_interval(data["X_test"])
 
     def test_predict_1d_raises(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError, match="2D"):
-            pipeline.predict(data["X_test"][:, 0])
+            pipeline.predict_interval(data["X_test"][:, 0])
 
     def test_predict_shapes(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"])
-        lower, upper = pipeline.predict(data["X_test"])
+        lower, upper = pipeline.predict_interval(data["X_test"])
         n = len(data["X_test"])
         assert lower.shape == (n,)
         assert upper.shape == (n,)
@@ -87,24 +88,24 @@ class TestFitPredict:
     def test_auto_calib_split(self, data):
         # When X_calib / y_calib are not given, pipeline auto-splits
         pipeline = _make_pipeline()
-        pipeline.fit(data["X_train"], data["y_train"], calib_size=0.2)
-        lower, _ = pipeline.predict(data["X_test"])
+        pipeline.set_params(calibration_size=0.2).fit(data["X_train"], data["y_train"])
+        lower, _ = pipeline.predict_interval(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
     def test_explicit_calib_split(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(
             data["X_train"], data["y_train"],
-            data["X_calib"], data["y_calib"],
+            X_calib=data["X_calib"], y_calib=data["y_calib"],
         )
-        lower, _ = pipeline.predict(data["X_test"])
+        lower, _ = pipeline.predict_interval(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
 
     def test_confidence_override(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"])
-        lower_90, upper_90 = pipeline.predict(data["X_test"], confidence=0.90)
-        lower_95, upper_95 = pipeline.predict(data["X_test"], confidence=0.95)
+        lower_90, upper_90 = pipeline.predict_interval(data["X_test"], confidence=0.90)
+        lower_95, upper_95 = pipeline.predict_interval(data["X_test"], confidence=0.95)
         assert (upper_95 - lower_95).mean() > (upper_90 - lower_90).mean()
 
     @pytest.mark.parametrize("calib", ["X_calib", "y_calib"])
@@ -116,13 +117,13 @@ class TestFitPredict:
     @pytest.mark.parametrize("confidence", [0, 1, 90, -0.1])
     def test_confidence_must_be_a_fraction(self, confidence):
         with pytest.raises(ValueError, match=r"confidence must be in \(0, 1\)"):
-            _make_pipeline(confidence=confidence)
+            _make_pipeline(confidence=confidence).fit(np.ones((8, 2)), np.zeros(8))
 
     def test_predict_confidence_override_validated(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError, match="confidence must be in"):
-            pipeline.predict(data["X_test"], confidence=95)
+            pipeline.predict_interval(data["X_test"], confidence=95)
 
     def test_feature_names_from_dataframe(self, data):
         cols = ["a", "b", "c", "d"]
@@ -140,9 +141,9 @@ class TestFitPredict:
         pipeline = _make_pipeline()
         pipeline.fit(pd.DataFrame(data["X_train"], columns=columns), data["y_train"])
         reordered = pd.DataFrame(data["X_test"], columns=columns)[columns[::-1]]
-        with pytest.raises(ValueError, match="columns.*order"):
-            pipeline.predict(reordered)
-        with pytest.raises(ValueError, match="columns.*order"):
+        with pytest.raises(ValueError, match="feature names should match"):
+            pipeline.predict_interval(reordered)
+        with pytest.raises(ValueError, match="feature names should match"):
             pipeline.explain(reordered, show_plots=False)
 
     def test_refit_with_array_clears_stale_feature_names(self, data):
@@ -170,16 +171,16 @@ class TestFitPredict:
             assert pipeline._feature_names is None
         # The explainer passed as a parameter is cloned, never modified.
         assert custom_explainer.feature_names == custom_names
-        assert custom_explainer.cp is None
-        assert pipeline.explainer_.cp is pipeline.conformal_predictor_
+        assert custom_explainer.conformal_predictor is None
+        assert pipeline.explainer_.conformal_predictor is pipeline.conformal_predictor_
 
     def test_failed_refit_invalidates_pipeline(self, data):
         pipeline = _make_pipeline()
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(ValueError):
             pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"])
-        with pytest.raises(RuntimeError, match="not fitted"):
-            pipeline.predict(data["X_test"])
+        with pytest.raises(NotFittedError, match="not fitted"):
+            pipeline.predict_interval(data["X_test"])
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +337,7 @@ def _fit_pdp_explanation(data, kind: str):
     """Helper: fit a PDP explainer with the given ``kind`` and return its explanation."""
     pipeline = _make_pipeline(xai_method="pdp")
     pipeline.fit(data["X_train"], data["y_train"])
-    pipeline.explainer_.fit(data["X_calib"], kind=kind)
+    pipeline.explainer_.set_params(kind=kind).fit(data["X_calib"])
     return pipeline.explainer_.explain(data["X_test"][:10])
 
 
@@ -372,31 +373,31 @@ class TestClassificationPipeline:
     def test_auto_detects_classification_from_classifier(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(model=classifier)
+        pipeline = UncertaintyExplanationPipeline(estimator=classifier)
         assert pipeline.task == "auto"  # the parameter is stored as given
         pipeline.fit(classification_data["X_train"], classification_data["y_train"])
         assert pipeline.task_ == "classification"
 
     def test_classification_requires_model(self):
-        with pytest.raises(ValueError, match="classification.*requires a 'model'"):
-            UncertaintyExplanationPipeline(task="classification")
+        with pytest.raises(ValueError, match="classification.*requires a 'estimator'"):
+            UncertaintyExplanationPipeline(task="classification").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_invalid_conformal_method_for_classification(self, classifier):
         with pytest.raises(ValueError, match="not valid for"):
             UncertaintyExplanationPipeline(
-                model=classifier,
+                estimator=classifier,
                 task="classification",
                 conformal_method="normalized",
-            )
+            ).fit(np.ones((8, 2)), np.zeros(8))
 
     def test_predict_returns_prediction_set(self, classification_data, classifier):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
         )
-        pred_set = pipeline.predict(classification_data["X_test"])
+        pred_set = pipeline.predict_set(classification_data["X_test"])
         assert pred_set.shape == (
             len(classification_data["X_test"]),
             classification_data["n_classes"],
@@ -407,7 +408,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification", xai_method="shap",
+            estimator=classifier, task="classification", xai_method="shap",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
@@ -433,7 +434,7 @@ class TestClassificationPipeline:
     ):
         kwargs = {"n_lime_samples": 50} if xai_method == "lime" else {}
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier,
+            estimator=classifier,
             task="classification",
             xai_method=xai_method,
             **kwargs,
@@ -451,7 +452,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
@@ -463,13 +464,13 @@ class TestClassificationPipeline:
         self, classification_data, classifier, method,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification", conformal_method=method,
+            estimator=classifier, task="classification", conformal_method=method,
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
-            classification_data["X_calib"], classification_data["y_calib"],
+            X_calib=classification_data["X_calib"], y_calib=classification_data["y_calib"],
         )
-        pred_set = pipeline.predict(classification_data["X_test"])
+        pred_set = pipeline.predict_set(classification_data["X_test"])
         assert pred_set.shape == (
             len(classification_data["X_test"]),
             classification_data["n_classes"],
@@ -479,28 +480,27 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification", random_state=0,
+            estimator=classifier, task="classification", random_state=0,
         )
-        pipeline.fit(
+        pipeline.set_params(calibration_size=0.2).fit(
             classification_data["X_train"], classification_data["y_train"],
-            calib_size=0.2,
         )
-        pred_set = pipeline.predict(classification_data["X_test"])
+        pred_set = pipeline.predict_set(classification_data["X_test"])
         assert pred_set.shape[0] == len(classification_data["X_test"])
 
     @pytest.mark.parametrize("split_seed", [None, 17])
     def test_auto_split_is_independent_of_labels_and_features(
         self, classifier, monkeypatch, split_seed,
     ):
-        pipeline = UncertaintyExplanationPipeline(model=classifier, random_state=0)
+        pipeline = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
         splits = []
         monkeypatch.setattr(CrepesConformalClassifier, "fit",
                             lambda self, *arrays: splits.append(arrays))
         X = np.arange(60).reshape(30, 2)
         labels = [np.arange(30) % 2, np.r_[np.zeros(29), 1]]
         for y in labels:
-            pipeline.fit(X, y, random_state=split_seed)
-        pipeline.fit(X + 1000, labels[-1], random_state=split_seed)
+            pipeline.set_params(random_state=0 if split_seed is None else split_seed).fit(X, y)
+        pipeline.set_params(random_state=0 if split_seed is None else split_seed).fit(X + 1000, labels[-1])
 
         for position in (0, 2):  # Training and calibration memberships.
             np.testing.assert_array_equal(splits[0][position], splits[1][position])
@@ -518,7 +518,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification", xai_method="pdp",
+            estimator=classifier, task="classification", xai_method="pdp",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
@@ -533,7 +533,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
             xai_method="lime", n_lime_samples=50,
         )
         pipeline.fit(
@@ -552,7 +552,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier,
     ):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
@@ -567,7 +567,7 @@ class TestClassificationPipeline:
     def test_explanation_is_deterministic(self, classification_data, classifier):
         """Explaining the same rows twice must give the same attributions."""
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
             uncertainty_metric="credibility",
         )
         pipeline.fit(
@@ -580,7 +580,7 @@ class TestClassificationPipeline:
 
     def test_explain_uncertainty_alias(self, classification_data, classifier):
         pipeline = UncertaintyExplanationPipeline(
-            model=classifier, task="classification",
+            estimator=classifier, task="classification",
         )
         pipeline.fit(
             classification_data["X_train"], classification_data["y_train"],
@@ -595,7 +595,7 @@ class TestClassificationPipeline:
         X_bg = data["X_train"][:20]
         pipeline.fit(
             data["X_train"], data["y_train"],
-            data["X_calib"], data["y_calib"],
+            X_calib=data["X_calib"], y_calib=data["y_calib"],
             X_background=X_bg,
         )
         assert pipeline._X_background.shape == X_bg.shape

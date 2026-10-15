@@ -42,7 +42,7 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
-    "scikit-learn>=1.4",
+    "scikit-learn>=1.6",
     "shap>=0.45",
     "crepes>=0.9.1",
     "lime>=0.2",

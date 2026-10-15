@@ -38,6 +38,35 @@ def test_waterfall_requires_real_baseline():
         shap_waterfall(shap.Explanation(values=np.array([[0.3, -0.2]])))
 
 
+def test_waterfall_preserves_total_when_features_are_grouped():
+    import matplotlib.pyplot as plt
+    import shap
+    from uxplain import shap_waterfall
+
+    values = np.array([[0.8, -0.4, 0.15, -0.05]])
+    explanation = shap.Explanation(values=values, base_values=np.array([2.0]))
+    ax = shap_waterfall(explanation, max_display=2)
+    # The displayed reference and result must include the grouped contributions.
+    endpoints = ax.collections[0].get_offsets()[:, 0]
+    np.testing.assert_allclose(endpoints, [2.0, 2.0 + values.sum()])
+    assert "2 other features" in [tick.get_text() for tick in ax.get_yticklabels()]
+    assert any(np.ptp(patch.get_xy()[:, 0]) > 0 for patch in ax.patches)
+    plt.close(ax.figure)
+
+
+def test_importance_panels_use_the_requested_common_order():
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from uxplain import importance_plot
+
+    table = pd.DataFrame({"importance": [0.8, 0.2], "ci_lower": [0.7, 0.1],
+                          "ci_upper": [0.9, 0.3]}, index=["a", "b"])
+    ax = importance_plot(table, order=["b", "a"])
+    assert [tick.get_text() for tick in ax.get_yticklabels()][::-1] == ["b", "a"]
+    np.testing.assert_allclose(ax.collections[1].get_offsets()[:, 0], [0.8, 0.2])
+    plt.close(ax.figure)
+
+
 def test_pdp_interaction_with_constant_feature():
     import matplotlib.pyplot as plt
 
@@ -55,7 +84,7 @@ def test_pdp_interaction_with_constant_feature():
 @pytest.fixture(scope="module")
 def regression_shap_result(data):
     from sklearn.linear_model import Ridge
-    pipeline = UncertaintyExplanationPipeline(model=Ridge(), xai_method="shap")
+    pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="shap")
     pipeline.fit(data["X_train"], data["y_train"])
     return pipeline, pipeline.explain(data["X_test"][:5], show_plots=False)
 
@@ -63,7 +92,7 @@ def regression_shap_result(data):
 @pytest.fixture(scope="module")
 def regression_pdp_result(data):
     from sklearn.linear_model import Ridge
-    pipeline = UncertaintyExplanationPipeline(model=Ridge(), xai_method="pdp")
+    pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="pdp")
     pipeline.fit(data["X_train"], data["y_train"])
     return pipeline, pipeline.explain(data["X_test"][:5], show_plots=False)
 
@@ -72,7 +101,7 @@ def regression_pdp_result(data):
 def regression_lime_result(data):
     from sklearn.linear_model import Ridge
     pipeline = UncertaintyExplanationPipeline(
-        model=Ridge(), xai_method="lime", n_lime_samples=50,
+        estimator=Ridge(), xai_method="lime", n_lime_samples=50,
     )
     pipeline.fit(data["X_train"], data["y_train"])
     return pipeline, pipeline.explain(data["X_test"][:3], show_plots=False)
@@ -81,7 +110,7 @@ def regression_lime_result(data):
 @pytest.fixture
 def classification_shap_result(classification_data, classifier):
     pipeline = UncertaintyExplanationPipeline(
-        model=classifier, task="classification", xai_method="shap",
+        estimator=classifier, task="classification", xai_method="shap",
     )
     pipeline.fit(
         classification_data["X_train"], classification_data["y_train"],
@@ -164,7 +193,7 @@ class TestGenerateDefaultPlots:
 class TestGeneratePDPPlots:
     def test_pdp_returns_figure(self, regression_pdp_result, data):
         pipeline, result = regression_pdp_result
-        pipeline.explainer_.fit(data["X_calib"], kind="both")
+        pipeline.explainer_.set_params(kind="both").fit(data["X_calib"])
         exp = pipeline.explainer_.explain(data["X_test"][:5])
         figs = generate_pdp_plots(exp, kinds=["pdp"], show=False)
         assert "pdp" in figs

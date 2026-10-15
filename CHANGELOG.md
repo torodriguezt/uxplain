@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.4.0 (development)
+
+### Changed
+- `predict(X)` now returns point predictions or class labels. Use
+  `predict_interval(X)` for endpoints and `predict_set(X)` for label sets.
+  CQR accepts an optional `estimator` for point prediction; it does not
+  substitute the midpoint when none is supplied.
+- Rename `model` to `estimator`, `lower_model`/`upper_model` to
+  `lower_estimator`/`upper_estimator`, and `predict_p` to `predict_p_values`.
+  Explainers consistently use `conformal_predictor` and `uncertainty_metric`;
+  `fast_path` selects the SHAP shortcut. Algorithm reports end in `_`.
+- Configure `calibration_size` and `random_state` in the pipeline constructor;
+  use `fit(X, y, *, X_calib=None, y_calib=None, X_background=None)` for data.
+  All explainers return `self` from `fit`. Configure them through constructors
+  or nested `set_params`; explanation-time configuration is deprecated.
+- Explain without plotting by default. Explicit result plotting remains available.
+- Add task tags, point-prediction `score`, and classifier `predict_proba`.
+  Regression and classification configurations pass sklearn common estimator
+  checks; `GridSearchCV` integration is covered by behavioral tests.
+- Preserve DataFrame columns through preprocessing and masked predictions;
+  fitted backend estimators are cloned and exposed with trailing underscores.
+- Redesign waterfall accumulation with explicit reference/result rows; add
+  aligned dot-and-interval importance displays and descriptive PDP/ICE bands.
+  Individual ICE lines and importance bars remain available.
+
+### Fixed
+- PDP now honors `set_params(features=...)` and leaves constructor parameters
+  unchanged during fitting. Unknown explainer settings no longer pass silently.
+- Use `NotFittedError` and sklearn fitted-state checks consistently.
+- Cap normalized-method `n_neighbors` at the proper training size so small
+  validation folds remain usable; expose the requested count on the backend.
+
+This is a breaking API update: update scripts before moving from 0.3.x.
+No distribution has been published as part of this development change.
+
+
 All notable changes to **uxplain** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project adheres to [Semantic Versioning](https://semver.org/).

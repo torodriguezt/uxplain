@@ -10,7 +10,9 @@ from numbers import Integral
 import numpy as np
 import shap
 from sklearn.base import BaseEstimator
+from sklearn.utils.validation import check_is_fitted
 
+from ..conformal._validation import remember_features
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import (
     UncertaintyMetric,
@@ -45,11 +47,12 @@ class ShapUncertaintyExplainer(BaseEstimator):
 
     def __init__(
         self,
-        cp: ConformalPredictorProtocol,
+        conformal_predictor: ConformalPredictorProtocol | None = None,
+        *,
         confidence: float = 0.9,
         algorithm: str = "auto",
         feature_names: list[str] | None = None,
-        metric: UncertaintyMetric = "width",
+        uncertainty_metric: UncertaintyMetric = "width",
         fast_path: bool = True,
         random_state: int | None = None,
         background_size: int | None = 100,
@@ -59,7 +62,7 @@ class ShapUncertaintyExplainer(BaseEstimator):
 
         Parameters
         ----------
-        cp
+        conformal_predictor
             Fitted conformal predictor.
 
         confidence : float
@@ -74,7 +77,7 @@ class ShapUncertaintyExplainer(BaseEstimator):
         feature_names : list of str, optional
             Feature names for SHAP explanation output.
 
-        metric : str
+        uncertainty_metric : str
             Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
             ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
             or ``"confidence"`` for classification.
@@ -98,60 +101,42 @@ class ShapUncertaintyExplainer(BaseEstimator):
             proportionally more.
         """
 
-        if background_size is not None and (
-            isinstance(background_size, bool)
-            or not isinstance(background_size, Integral)
-            or background_size < 1
-        ):
-            raise ValueError("background_size must be a positive integer or None.")
-
-        self.cp = cp
+        self.conformal_predictor = conformal_predictor
         self.confidence = confidence
         self.algorithm = algorithm
         self.feature_names = feature_names
-        self.metric = metric
+        self.uncertainty_metric = uncertainty_metric
         self.fast_path = fast_path
         self.random_state = random_state
         self.background_size = background_size
 
-        #: True when the last ``explain()`` call used exact TreeSHAP.
-        self.used_fast_path: bool | None = None
-        #: Algorithm of the last ``explain()`` call: ``"tree"`` for the exact
-        #: TreeSHAP shortcut, otherwise the generic SHAP algorithm, e.g.
-        #: ``"exact"`` or ``"permutation"``.
-        self.algorithm_used: str | None = None
 
-        self._shap_explainer: shap.Explainer | None = None
-        self._background: np.ndarray | None = None
-        self._target_function = None
-        self._rng = np.random.RandomState(random_state)
 
-    def fit(
-        self,
-        X_background: np.ndarray,
-        algorithm: str | None = None,
-    ) -> None:
+    def fit(self, X, y=None):
+        """Prepare the explainer on reference observations and return self.
+
+        Configure the explanation through the constructor or ``set_params``.
+        ``y`` is accepted for compatibility and is ignored.
         """
-        Build SHAP explainer from background data.
+        self.fitted_ = False
+        if self.conformal_predictor is None:
+            raise ValueError("A fitted conformal_predictor is required.")
+        if self.background_size is not None and (
+            isinstance(self.background_size, bool)
+            or not isinstance(self.background_size, Integral)
+            or self.background_size < 1
+        ):
+            raise ValueError("self.background_size must be a positive integer or None.")
 
-        Parameters
-        ----------
-        X_background : np.ndarray of shape (n_background, n_features)
-            Reference rows defining the interventional SHAP game. Subsampled
-            according to ``background_size`` and ``random_state``.
-        algorithm : str, optional
-            Override the constructor's generic SHAP algorithm for this fit.
-
-        Returns
-        -------
-        None
-            Initializes the explainer and resets the last algorithm report.
-        """
-
+        X_background = X
+        self._feature_names = self.feature_names
+        if self._feature_names is None and hasattr(X, "columns"):
+            self._feature_names = list(X.columns)
+        remember_features(self, X if hasattr(X, "shape") else np.asarray(X))
         self._target_function = make_uncertainty_function(
-            self.cp,
+            self.conformal_predictor,
             confidence=self.confidence,
-            metric=self.metric,
+            metric=self.uncertainty_metric,
         )
         background = np.asarray(X_background)
         if self.background_size is not None and len(background) > self.background_size:
@@ -170,11 +155,14 @@ class ShapUncertaintyExplainer(BaseEstimator):
             self._shap_explainer = shap.Explainer(
                 self._target_function,
                 masker,
-                algorithm=algorithm or self.algorithm,
+                algorithm=self.algorithm,
                 seed=self.random_state,
             )
-        self.used_fast_path = None
-        self.algorithm_used = None
+        self.used_fast_path_ = None
+        self.algorithm_used_ = None
+
+        self.fitted_ = True
+        return self
 
     def explain(
         self,
@@ -198,38 +186,38 @@ class ShapUncertaintyExplainer(BaseEstimator):
             `ShapExplanation.to_shap` for SHAP's own plotting functions.
         """
 
-        if self._shap_explainer is None:
-            raise RuntimeError(
-                "Explainer not fitted. Call fit() first."
-            )
+        check_is_fitted(self)
 
         X = np.asarray(X)
         fast = None
         if self.fast_path:
             fast = tree_shap_values(
-                self.cp,
-                self.metric,
+                self.conformal_predictor,
+                self.uncertainty_metric,
                 X,
                 self._background,
                 self._target_function,
             )
-        self.used_fast_path = fast is not None
+        self.used_fast_path_ = fast is not None
 
         if fast is not None:
             values, base_values = fast
-            self.algorithm_used = "tree"
+            self.algorithm_used_ = "tree"
         else:
             with _shap_random_state(self._rng):
                 generic = self._shap_explainer(X)
             values, base_values = generic.values, generic.base_values
             name = type(self._shap_explainer).__name__
-            self.algorithm_used = name.removesuffix("Explainer").lower() or name
+            self.algorithm_used_ = name.removesuffix("Explainer").lower() or name
 
         return ShapExplanation(
             values=np.asarray(values, dtype=float),
             base_values=np.asarray(base_values, dtype=float),
             data=X,
-            feature_names=None if self.feature_names is None else list(self.feature_names),
-            metric=self.metric,
-            algorithm=self.algorithm_used,
+            feature_names=None if self._feature_names is None else list(self._feature_names),
+            metric=self.uncertainty_metric,
+            algorithm=self.algorithm_used_,
         )
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "fitted_", False)

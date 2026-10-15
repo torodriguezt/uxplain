@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.inspection import partial_dependence
+from sklearn.utils.validation import check_is_fitted
 
+from ..conformal._validation import remember_features
 from ..protocols import ConformalPredictorProtocol
 from ..uncertainty.metrics import UncertaintyMetric, make_uncertainty_function
 from .base import UncertaintyExplanation
@@ -135,7 +137,8 @@ class PDPUncertaintyExplainer(BaseEstimator):
 
     def __init__(
         self,
-        cp: ConformalPredictorProtocol,
+        conformal_predictor: ConformalPredictorProtocol | None = None,
+        *,
         confidence: float = 0.9,
         method: str = "brute",
         features: list[int] | None = None,
@@ -145,14 +148,14 @@ class PDPUncertaintyExplainer(BaseEstimator):
         kind: str = "average",
         feature_names: list[str] | None = None,
         n_jobs: int | None = None,
-        metric: UncertaintyMetric = "width",
+        uncertainty_metric: UncertaintyMetric = "width",
     ):
         """
         Initialize PDP explainer.
 
         Parameters
         ----------
-        cp
+        conformal_predictor
             Fitted conformal predictor.
 
         confidence : float
@@ -189,81 +192,43 @@ class PDPUncertaintyExplainer(BaseEstimator):
             Reserved for estimator compatibility; currently unused. Features
             are evaluated sequentially.
 
-        metric : str
+        uncertainty_metric : str
             Scalar target: ``"width"``, ``"lower"``, ``"upper"`` or
             ``"midpoint"`` for regression; ``"set_size"``, ``"credibility"``
             or ``"confidence"`` for classification.
         """
 
-        self.cp = cp
+        self.conformal_predictor = conformal_predictor
         self.confidence = confidence
         self.method = method
         self.features = features
-        # fit() overwrites self.features with the resolved list; keep the
-        # constructor's choice to fall back on when fit() gets features=None.
-        self._default_features = features
         self.grid_resolution = grid_resolution
         self.grid_resolution_2d = grid_resolution_2d
         self.percentiles = percentiles
         self.kind = kind
         self.feature_names = feature_names
         self.n_jobs = n_jobs
-        self.metric = metric
+        self.uncertainty_metric = uncertainty_metric
 
-        self._estimator: _FunctionEstimator | None = None
 
-    def fit(
-        self,
-        X_background: np.ndarray,
-        features: list | None = None,
-        kind: str | None = None,
-        grid_resolution: int | None = None,
-        percentiles: tuple[float, float] | None = None,
-        **_,
-    ) -> None:
+    def fit(self, X, y=None):
+        """Prepare the explainer on reference observations and return self.
+
+        Configure the explanation through the constructor or ``set_params``.
+        ``y`` is accepted for compatibility and is ignored.
         """
-        Build the internal estimator from background data.
-
-        Parameters
-        ----------
-        X_background : np.ndarray
-            Array accepted when initializing the estimator. The rows passed to
-            ``explain()`` determine the grids and marginalization sample.
-        features : list, optional
-            Mixed list of 1D features and 2D interaction pairs:
-
-            - Integers or strings → 1D PDP (e.g. ``[0, 1, "age"]``)
-            - Tuples of two → 2D interaction heatmap (e.g. ``[(0, 1)]``)
-            - Both together → ``[0, 1, (0, 1)]``
-
-            Falls back to the value set at ``__init__`` when ``None``.
-        kind : {"average", "individual", "both"}, optional
-            Overrides the value set at ``__init__``. Unchanged when ``None``.
-        grid_resolution : int, optional
-            Overrides the value set at ``__init__``. Unchanged when ``None``.
-        percentiles : tuple of float, optional
-            Overrides the value set at ``__init__``. Unchanged when ``None``.
-        **_
-            Additional keyword arguments are accepted and ignored.
-
-        Returns
-        -------
-        None
-            Initializes the scalar target estimator and resolves feature names.
-        """
-
-        if kind is not None:
-            self.kind = kind
-        if grid_resolution is not None:
-            self.grid_resolution = grid_resolution
-        if percentiles is not None:
-            self.percentiles = percentiles
-
+        self.fitted_ = False
+        if self.conformal_predictor is None:
+            raise ValueError("A fitted conformal_predictor is required.")
+        X_background = X
+        self._feature_names = self.feature_names
+        if self._feature_names is None and hasattr(X, "columns"):
+            self._feature_names = list(X.columns)
+        remember_features(self, X if hasattr(X, "shape") else np.asarray(X))
+        features = self.features
         if features is None:
-            features = self._default_features
-        if features is None:
-            self.features = None
-            self.feature_pairs = None
+            self.features_ = None
+            self.feature_pairs_ = None
         else:
             features_1d = []
             features_2d = []
@@ -274,23 +239,26 @@ class PDPUncertaintyExplainer(BaseEstimator):
                     features_1d.append(f)
 
             def _resolve(idx):
-                if self.feature_names and isinstance(idx, str):
-                    return self.feature_names.index(idx)
+                if self._feature_names and isinstance(idx, str):
+                    return self._feature_names.index(idx)
                 return idx
 
             # Keep [] (explicitly empty) separate from None (not set = all features)
-            self.features = [_resolve(f) for f in features_1d]
-            self.feature_pairs = [
+            self.features_ = [_resolve(f) for f in features_1d]
+            self.feature_pairs_ = [
                 (_resolve(a), _resolve(b)) for a, b in features_2d
             ] or None
 
         target_function = make_uncertainty_function(
-            self.cp,
+            self.conformal_predictor,
             confidence=self.confidence,
-            metric=self.metric,
+            metric=self.uncertainty_metric,
         )
 
         self._estimator = _FunctionEstimator(target_function).fit(X_background)
+
+        self.fitted_ = True
+        return self
 
     def explain(
         self,
@@ -314,18 +282,17 @@ class PDPUncertaintyExplainer(BaseEstimator):
             ``.features``, ``.feature_names``, and ``.individual``.
         """
 
-        if self._estimator is None:
-            raise RuntimeError("Explainer not fitted. Call fit() first.")
+        check_is_fitted(self)
 
-        feature_pairs = self.feature_pairs or []
+        feature_pairs = self.feature_pairs_ or []
 
-        if self.features is None:
+        if self.features_ is None:
             features_1d = list(range(X.shape[1]))
-        elif not self.features and feature_pairs:
+        elif not self.features_ and feature_pairs:
             # Only tuples passed → compute 1D for each member of the pairs
             features_1d = sorted({f for pair in feature_pairs for f in pair})
         else:
-            features_1d = self.features
+            features_1d = self.features_
 
         # 1D: loop with partial_dependence
         values = []
@@ -384,10 +351,13 @@ class PDPUncertaintyExplainer(BaseEstimator):
             feature_pairs=feature_pairs,
             values_2d=values_2d or None,
             grid_values_2d=grid_values_2d or None,
-            metric=self.metric,
+            metric=self.uncertainty_metric,
         )
 
-        if self.feature_names is not None:
-            explanation.feature_names = self.feature_names
+        if self._feature_names is not None:
+            explanation.feature_names = self._feature_names
 
         return explanation
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "fitted_", False)
