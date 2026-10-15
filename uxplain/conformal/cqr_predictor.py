@@ -7,12 +7,13 @@ Implements CQR (Romano, Patterson & Candès, 2019).
 from __future__ import annotations
 
 import numpy as np
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.utils.validation import check_is_fitted
 
-from ._validation import check_confidence, check_fit_data
+from ._validation import check_confidence, check_fit_data, prediction_frame, remember_features
 
 
-class CQRConformalPredictor(BaseEstimator):
+class CQRConformalPredictor(RegressorMixin, BaseEstimator):
     """
     Conformalized Quantile Regression (CQR) predictor.
 
@@ -22,7 +23,7 @@ class CQRConformalPredictor(BaseEstimator):
 
     Parameters
     ----------
-    lower_model : object
+    lower_estimator : object
         Quantile regressor trained at quantile level ``alpha / 2``.
         Must expose a sklearn-compatible ``fit(X, y)`` / ``predict(X)``
         interface. Example:
@@ -31,7 +32,7 @@ class CQRConformalPredictor(BaseEstimator):
         GradientBoostingRegressor(loss="quantile", alpha=0.05)
         ```
 
-    upper_model : object
+    upper_estimator : object
         Quantile regressor trained at quantile level ``1 - alpha / 2``.
         Example:
 
@@ -48,6 +49,11 @@ class CQRConformalPredictor(BaseEstimator):
         produce empty sets. Only the midpoint then stays affine in the two
         quantile models.
 
+    estimator : object or None, default=None
+        Optional point regressor, cloned and fitted independently on training
+        observations. Required only for predict() and score(); the two quantile
+        regressors alone suffice for predict_interval() and explanations.
+
     Notes
     -----
     The quantile levels baked into the models should match the
@@ -63,18 +69,17 @@ class CQRConformalPredictor(BaseEstimator):
     the nonnegative length of the empty set.
     """
 
-    def __init__(self, lower_model, upper_model, rearrange: bool = False):
-        self.lower_model = lower_model
-        self.upper_model = upper_model
+    def __init__(self, lower_estimator, upper_estimator, *, rearrange: bool = False, estimator=None):
+        self.lower_estimator = lower_estimator
+        self.upper_estimator = upper_estimator
         self.rearrange = rearrange
+        self.estimator = estimator
 
-        self._scores: np.ndarray | None = None
-        self._n_calib: int | None = None
 
     def fit(
         self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
     ):
@@ -83,12 +88,12 @@ class CQRConformalPredictor(BaseEstimator):
 
         Parameters
         ----------
-        X_train : array-like of shape (n_train, n_features)
+        X : array-like of shape (n_train, n_features)
             Features used to fit both quantile regressors.
-        y_train : array-like of shape (n_train,)
+        y : array-like of shape (n_train,)
             Training target values.
         X_calib : array-like of shape (n_calib, n_features)
-            Held-out calibration features with the same columns as `X_train`.
+            Held-out calibration features with the same columns as `X`.
         y_calib : array-like of shape (n_calib,)
             Finite calibration target values used to compute nonconformity
             scores from the two fitted quantile regressors.
@@ -99,26 +104,33 @@ class CQRConformalPredictor(BaseEstimator):
             The fitted and calibrated predictor.
         """
 
+        self._is_fitted = False
         self._scores = None
         self._n_calib = None
-        X_train, y_train, X_calib, y_calib = check_fit_data(
-            X_train, y_train, X_calib, y_calib,
+        X, y, X_calib, y_calib = check_fit_data(
+            X, y, X_calib, y_calib,
         )
         y_calib = np.asarray(y_calib, dtype=float)
         if not np.all(np.isfinite(y_calib)):
             raise ValueError("y_calib must contain only finite values.")
 
-        self.lower_model.fit(X_train, y_train)
-        self.upper_model.fit(X_train, y_train)
+        remember_features(self, X)
+        self.lower_estimator_ = clone(self.lower_estimator, safe=False)
+        self.upper_estimator_ = clone(self.upper_estimator, safe=False)
+        if self.estimator is not None:
+            self.estimator_ = clone(self.estimator, safe=False).fit(X, y)
+        self.lower_estimator_.fit(X, y)
+        self.upper_estimator_.fit(X, y)
 
         q_low, q_high = self._quantiles(X_calib)
 
         # CQR nonconformity score: max(q_low - y, y - q_high)
         self._scores = np.maximum(q_low - y_calib, y_calib - q_high)
         self._n_calib = len(y_calib)
+        self._is_fitted = True
         return self
 
-    def predict(
+    def predict_interval(
         self,
         X: np.ndarray,
         confidence: float = 0.9,
@@ -150,11 +162,10 @@ class CQRConformalPredictor(BaseEstimator):
         span, not the nonnegative length of the empty set.
         """
 
-        if self._scores is None:
-            raise RuntimeError("CQRConformalPredictor not fitted. Call fit() first.")
+        check_is_fitted(self)
 
         check_confidence(confidence)
-        X = np.asarray(X)
+        X = prediction_frame(self, X)
 
         # Conformal quantile (Romano et al., 2019): the ceil((n + 1) * confidence)-th
         # smallest score. When that rank exceeds n, no finite adjustment
@@ -171,17 +182,27 @@ class CQRConformalPredictor(BaseEstimator):
         return q_low - adjustment, q_high + adjustment
 
     def _quantiles(self, X):
-        q_low = self._predict_quantile(self.lower_model, X)
-        q_high = self._predict_quantile(self.upper_model, X)
+        q_low = self._predict_quantile(self.lower_estimator_, X)
+        q_high = self._predict_quantile(self.upper_estimator_, X)
         if self.rearrange:
             q_low, q_high = np.minimum(q_low, q_high), np.maximum(q_low, q_high)
         return q_low, q_high
 
     @staticmethod
-    def _predict_quantile(model, X):
-        values = np.asarray(model.predict(X), dtype=float)
+    def _predict_quantile(estimator, X):
+        values = np.asarray(estimator.predict(X), dtype=float)
         if values.shape != (len(X),):
             raise ValueError("Quantile models must predict one value per sample.")
         if not np.all(np.isfinite(values)):
-            raise ValueError("Quantile model predictions must contain only finite values.")
+            raise ValueError("Quantile estimator predictions must contain only finite values.")
         return values
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "_is_fitted", False)
+
+    def predict(self, X):
+        """Return point predictions from the fitted base estimator."""
+        check_is_fitted(self)
+        if self.estimator is None:
+            raise AttributeError("CQR point prediction requires estimator=; use predict_interval for intervals.")
+        return self.estimator_.predict(prediction_frame(self, X))

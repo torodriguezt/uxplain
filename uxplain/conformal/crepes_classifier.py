@@ -10,9 +10,10 @@ from typing import Literal
 
 from crepes import WrapClassifier
 import numpy as np
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.utils.validation import check_is_fitted
 
-from ._validation import check_confidence, check_fit_data
+from ._validation import check_confidence, check_fit_data, prediction_frame, remember_features
 
 ClassificationConformalMethod = Literal[
     "standard",
@@ -21,13 +22,13 @@ ClassificationConformalMethod = Literal[
 ]
 
 
-class CrepesConformalClassifier(BaseEstimator):
+class CrepesConformalClassifier(ClassifierMixin, BaseEstimator):
     """
     Wrapper for conformal classification using crepes.
 
     Parameters
     ----------
-    model : object
+    estimator : object
         Any sklearn-compatible classifier exposing
         ``fit``, ``predict``, and ``predict_proba``.
     method : ClassificationConformalMethod, default="standard"
@@ -43,22 +44,22 @@ class CrepesConformalClassifier(BaseEstimator):
         Use randomized tie-breaking for prediction. Even with a fixed seed,
         smoothed p-values can depend on row order and batch size, so built-in
         explainers require ``smoothing=False``. Non-smoothed p-values are
-        deterministic for a fixed deterministic model and conservative under
+        deterministic for a fixed deterministic estimator and conservative under
         the conformal assumptions; smoothing does not repair invalid sampling.
 
     Attributes
     ----------
     classes_ : numpy.ndarray of shape (n_classes,)
-        Labels learned by the fitted model, in the column order used by
-        `predict_set`, `predict_p`, and `predict_proba`.
+        Labels learned by the fitted estimator, in the column order used by
+        `predict_set`, `predict_p_values`, and `predict_proba`.
 
     Notes
     -----
     Coverage requires calibration and future scores to be exchangeable after
     training, within the selected groups for conditional methods. The fitted
-    model's classes must contain the full target label space. Unknown calibration
+    estimator's classes must contain the full target label space. Unknown calibration
     labels raise an error; future labels absent from ``classes_`` cannot be
-    covered. Do not select a split or tune the model on calibration outcomes.
+    covered. Do not select a split or tune the estimator on calibration outcomes.
 
     Examples
     --------
@@ -66,53 +67,48 @@ class CrepesConformalClassifier(BaseEstimator):
     >>> cp = CrepesConformalClassifier(RandomForestClassifier(), method="class_cond")
     >>> cp.fit(X_train, y_train, X_calib, y_calib)
     >>> pred_set = cp.predict_set(X_test, confidence=0.9)   # (n, n_classes) bool
-    >>> p_values = cp.predict_p(X_test)                     # (n, n_classes)
+    >>> p_values = cp.predict_p_values(X_test)                     # (n, n_classes)
     """
 
     def __init__(
         self,
-        model,
+        estimator,
+        *,
         method: ClassificationConformalMethod = "standard",
         random_state: int | None = None,
         smoothing: bool = False,
     ):
-        if method not in ("standard", "class_cond", "mondrian"):
-            raise ValueError(f"Unknown conformal classification method '{method}'.")
-        self.model = model
+        self.estimator = estimator
         self.method = method
         self.random_state = random_state
         self.smoothing = smoothing
-        self.wrapper = None
 
     def fit(
         self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-        **kwargs,
     ):
         """
         Fit the classifier and calibrate conformal prediction sets.
 
         Calibration uses all observations for `standard`, groups by true class
-        for `class_cond`, and groups by the fitted model's predicted class for
+        for `class_cond`, and groups by the fitted estimator's predicted class for
         `mondrian`.
 
         Parameters
         ----------
-        X_train : array-like of shape (n_train, n_features)
+        X : array-like of shape (n_train, n_features)
             Features used to fit the underlying classifier.
-        y_train : array-like of shape (n_train,)
-            Training class labels. The fitted model must include the full
+        y : array-like of shape (n_train,)
+            Training class labels. The fitted estimator must include the full
             target label space in its `classes_` attribute.
         X_calib : array-like of shape (n_calib, n_features)
-            Held-out calibration features with the same columns as `X_train`.
+            Held-out calibration features with the same columns as `X`.
         y_calib : array-like of shape (n_calib,)
-            Calibration labels. Labels absent from the fitted model's
+            Calibration labels. Labels absent from the fitted estimator's
             `classes_` raise a `ValueError`.
-        **kwargs : dict
-            Additional keyword arguments are accepted and ignored.
 
         Returns
         -------
@@ -120,19 +116,24 @@ class CrepesConformalClassifier(BaseEstimator):
             The fitted and calibrated classifier.
         """
 
-        self.wrapper = None
+        if self.method not in ("standard", "class_cond", "mondrian"):
+            raise ValueError(f"Unknown conformal classification method '{self.method}'.")
+        self._is_fitted = False
+        self.wrapper_ = None
         self.classes_ = None
-        X_train, y_train, X_calib, y_calib = check_fit_data(
-            X_train, y_train, X_calib, y_calib,
+        X, y, X_calib, y_calib = check_fit_data(
+            X, y, X_calib, y_calib,
         )
 
+        remember_features(self, X)
+        self.estimator_ = clone(self.estimator, safe=False)
         # Train
-        self.model.fit(X_train, y_train)
-        self.classes_ = np.asarray(self.model.classes_)
+        self.estimator_.fit(X, y)
+        self.classes_ = np.asarray(self.estimator_.classes_)
         if not np.all(np.isin(y_calib, self.classes_)):
-            raise ValueError("y_calib contains classes absent from the fitted model.")
+            raise ValueError("y_calib contains classes absent from the fitted estimator.")
 
-        self.wrapper = WrapClassifier(self.model)
+        self.wrapper_ = WrapClassifier(self.estimator_)
 
         # Build calibration kwargs based on method
         calibrate_kwargs = {}
@@ -140,14 +141,15 @@ class CrepesConformalClassifier(BaseEstimator):
         if self.method == "class_cond":
             calibrate_kwargs["class_cond"] = True
         elif self.method == "mondrian":
-            calibrate_kwargs["mc"] = self.model.predict
+            calibrate_kwargs["mc"] = self.estimator_.predict
 
         # Calibrate
-        self.wrapper.calibrate(
+        self.wrapper_.calibrate(
             X_calib,
             y_calib,
             **calibrate_kwargs,
         )
+        self._is_fitted = True
         return self
 
     def predict_set(
@@ -173,19 +175,18 @@ class CrepesConformalClassifier(BaseEstimator):
             the prediction set for sample `i`. Columns follow `classes_` order.
         """
 
-        if self.wrapper is None:
-            raise RuntimeError("CrepesConformalClassifier not fitted.")
+        check_is_fitted(self)
 
         check_confidence(confidence)
-        X = np.asarray(X)
+        X = prediction_frame(self, X)
         # labels=False keeps the binary-array output; since crepes 0.9.1
         # the default (labels=True) returns a list of lists of labels.
-        return self.wrapper.predict_set(
+        return self.wrapper_.predict_set(
             X, confidence=confidence, smoothing=self.smoothing,
             seed=self.random_state, labels=False,
         ).astype(bool)
 
-    def predict_p(
+    def predict_p_values(
         self,
         X: np.ndarray,
     ) -> np.ndarray:
@@ -203,14 +204,13 @@ class CrepesConformalClassifier(BaseEstimator):
             Conformal p-values between 0 and 1. Entry `[i, k]` evaluates
             candidate label `classes_[k]` for sample `i`. These values use
             the configured `smoothing` and `random_state`; they are not
-            model probabilities and need not sum to one across classes.
+            estimator probabilities and need not sum to one across classes.
         """
 
-        if self.wrapper is None:
-            raise RuntimeError("CrepesConformalClassifier not fitted.")
+        check_is_fitted(self)
 
-        X = np.asarray(X)
-        return self.wrapper.predict_p(
+        X = prediction_frame(self, X)
+        return self.wrapper_.predict_p(
             X, smoothing=self.smoothing, seed=self.random_state,
         )
 
@@ -218,7 +218,7 @@ class CrepesConformalClassifier(BaseEstimator):
         self,
         X: np.ndarray,
     ) -> np.ndarray:
-        """Return class probabilities from the underlying fitted model.
+        """Return class probabilities from the underlying fitted estimator.
 
         Parameters
         ----------
@@ -233,5 +233,14 @@ class CrepesConformalClassifier(BaseEstimator):
             `i`. No conformal calibration is applied to these probabilities.
         """
 
-        return self.model.predict_proba(np.asarray(X))
+        check_is_fitted(self)
+        return self.estimator_.predict_proba(prediction_frame(self, X))
 
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "_is_fitted", False)
+
+    def predict(self, X):
+        """Return point predictions from the fitted base estimator."""
+        check_is_fitted(self)
+        return self.estimator_.predict(prediction_frame(self, X))
