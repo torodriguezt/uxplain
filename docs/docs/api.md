@@ -115,6 +115,8 @@ standard figures.
 
 ::: uxplain.lime_local
 
+::: uxplain.importance_plot
+
 ::: uxplain.importance_bar
 
 ::: uxplain.STYLE
