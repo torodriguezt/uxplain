@@ -7,12 +7,19 @@ or [Extending](extending.md) to connect a custom backend.
 Most objects below are available directly from `uxplain`. Dataset helpers live
 in `uxplain.datasets`; plotting presets are available from `uxplain.plotting`.
 
-## Pipeline
+<a id="pipeline"></a>
 
-The pipeline fits and calibrates a predictor, produces predictions, evaluates
+## Conformal explainer
+
+`ConformalExplainer` fits and calibrates a predictor, produces predictions, evaluates
 empirical coverage, and explains a scalar summary of uncertainty.
 
-::: uxplain.UncertaintyExplanationPipeline
+<a id="uxplain.UncertaintyExplanationPipeline"></a>
+
+The former name `UncertaintyExplanationPipeline` remains an alias for
+`ConformalExplainer`; existing imports continue to work.
+
+::: uxplain.ConformalExplainer
 
 ## Results and explanations
 
@@ -73,7 +80,7 @@ selects the scalar explained by SHAP, PDP or LIME. Classification's
 
 ## Explainers
 
-The pipeline constructs these explainers automatically. Use them directly when
+`ConformalExplainer` constructs these components automatically. Use them directly when
 working with an already fitted conformal predictor.
 
 ::: uxplain.ShapUncertaintyExplainer
@@ -86,6 +93,10 @@ working with an already fitted conformal predictor.
 
 `pipeline.evaluate()` wraps `coverage_table()`. The result and explanation
 objects' `feature_importance()` methods wrap `importance_table()`.
+
+Evaluation tables display four decimal places by default while retaining full
+precision for calculations and CSV export. Use `to_string(float_format=...)`
+to customize the printed number format.
 
 ::: uxplain.coverage_table
 
@@ -155,7 +166,8 @@ See each loader for input requirements, coding and sampling options.
 
 These structural interfaces describe custom predictors and explainers.
 Inheritance from the protocols is optional; implementing their methods is
-sufficient. See [Extending](extending.md) for a complete MAPIE adapter.
+sufficient. See [Extending](extending.md) for the backend contracts and
+custom explainer requirements.
 
 ::: uxplain.ConformalPredictorProtocol
 

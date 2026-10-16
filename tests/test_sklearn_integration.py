@@ -1,6 +1,7 @@
 """Interoperability tests exercise sklearn tools and the complete fitted workflow."""
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,13 +14,16 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.estimator_checks import check_estimator
+from sklearn.utils.validation import check_is_fitted
 
 from uxplain import (
-    CQRConformalPredictor, CrepesConformalPredictor,
-    LimeUncertaintyExplainer, PDPUncertaintyExplainer,
-    ShapUncertaintyExplainer, UncertaintyExplanationPipeline,
+    ConformalExplainer,
+    CQRConformalPredictor,
+    CrepesConformalPredictor,
+    LimeUncertaintyExplainer,
+    PDPUncertaintyExplainer,
+    ShapUncertaintyExplainer,
 )
 
 
@@ -27,7 +31,7 @@ from uxplain import (
     (Ridge(), "standard"), (Ridge(), "normalized"), (LogisticRegression(), "standard"),
 ])
 def test_sklearn_common_estimator_checks(estimator, method):
-    check_estimator(UncertaintyExplanationPipeline(
+    check_estimator(ConformalExplainer(
         estimator=estimator, conformal_method=method, random_state=0,
     ))
 
@@ -46,7 +50,7 @@ def test_grid_search_and_point_prediction_semantics(observations, classification
     estimator = LogisticRegression() if classification else Ridge()
     if classification:
         y = np.where(y > 0, "yes", "no")
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=estimator, conformal_method="standard", random_state=5,
     )
     search = GridSearchCV(pipeline, {"calibration_size": [0.2, 0.3]}, cv=3)
@@ -74,7 +78,7 @@ def test_named_preprocessing_works_through_explanation(observations, method):
         Ridge(),
     )
     # A varying summary exercises masked inputs and DataFrame reconstruction.
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=estimator, conformal_method="standard", xai_method=method,
         uncertainty_metric="midpoint", random_state=9, n_lime_samples=50,
     ).fit(X=X, y=y)
@@ -110,7 +114,7 @@ def test_pdp_preserves_parameters_and_obeys_nested_set_params(observations):
     X, y = observations
     features = ["age"]
     explainer = PDPUncertaintyExplainer(features=features)
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=Ridge(), conformal_method="standard", explainer=explainer,
         random_state=4,
     ).set_params(explainer__features=["hours"])

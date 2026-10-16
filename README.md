@@ -27,12 +27,12 @@ install it with `python -m pip install -e .`; see the migration notes in
 from sklearn.datasets import make_regression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from uxplain import UncertaintyExplanationPipeline
+from uxplain import ConformalExplainer
 
 X, y = make_regression(n_samples=400, n_features=4, noise=15, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
-pipe = UncertaintyExplanationPipeline(
+pipe = ConformalExplainer(
     estimator=RandomForestRegressor(n_estimators=50, random_state=42),
     uncertainty_metric="width",
     random_state=42,
@@ -46,7 +46,7 @@ print(result.feature_importance())     # which features drive the width
 print(result.to_frame())               # bounds and width for the explained rows
 ```
 
-With a classifier, the same pipeline explains prediction-set summaries such as
+With a classifier, the same conformal explainer explains prediction-set summaries such as
 `set_size`. The following example is independent of the regression example:
 
 ```python
@@ -54,14 +54,14 @@ import pandas as pd
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from uxplain import UncertaintyExplanationPipeline
+from uxplain import ConformalExplainer
 
 X, y = make_classification(
     n_samples=300, n_features=4, n_informative=3,
     n_redundant=0, random_state=42,
 )
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
-classifier = UncertaintyExplanationPipeline(
+classifier = ConformalExplainer(
     estimator=RandomForestClassifier(n_estimators=50, random_state=42),
     uncertainty_metric="set_size",
     random_state=42,
@@ -75,16 +75,19 @@ print(classifier.evaluate(X_test, y_test, groups=y_test))
 `classes_`; these values are not class probabilities and need not sum to one.
 `predict_set()` returns a Boolean prediction-set matrix in the same column order.
 
-The pipeline and its components follow scikit-learn conventions
+The conformal explainer and its components follow scikit-learn conventions
 (`get_params`, `set_params`, `clone`), and custom conformal backends can be
 plugged in through a small protocol.
+
+`UncertaintyExplanationPipeline` remains an alias for `ConformalExplainer` so
+existing imports continue to work.
 
 ## Learn more
 
 The [getting-started guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/getting-started.md)
 covers classification, calibration, the available summaries and explainer
 options. The [Extending guide](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/extending.md)
-includes a complete MAPIE adapter, and the
+describes custom predictors and explainers, and the
 [API reference source](https://github.com/torodriguezt/uxplain/blob/main/docs/docs/api.md)
 defines the reference generated from the package's docstrings. See the
 [notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks)

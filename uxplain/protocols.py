@@ -1,7 +1,7 @@
 """Public contracts for replaceable conformal predictors and explainers.
 
 Components may inherit BaseEstimator for cloning and nested parameters. The
-pipeline clones templates before fitting; it binds each explainer's
+conformal explainer clones templates before fitting; it binds each explainer's
 conformal_predictor parameter to the fitted conformal component. Prediction
 of intervals/sets is separate from optional point prediction and probabilities.
 """

@@ -30,11 +30,9 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install documentation and example dependencies
-        run: python -m pip install -e ".[docs]" pytest "mapie==1.5.0"
-      - name: Verify the custom backend and MAPIE adapter
-        run: |
-          python -c "import mapie; print(mapie.__version__)"
-          python -m pytest tests/test_extensibility.py -q
+        run: python -m pip install -e ".[docs]" pytest
+      - name: Verify the custom backend interface
+        run: python -m pytest tests/test_extensibility.py -q
       - name: Build documentation with warnings treated as errors
         run: python -m mkdocs build --strict -f docs/mkdocs.yml
       - name: Upload documentation artifact

@@ -12,17 +12,21 @@ regression (prediction intervals) and classification (prediction sets).
 pip install uxplain
 ```
 
+The examples below use the development 0.4 API, including `ConformalExplainer`.
+To run them, install the supplied source checkout with
+`python -m pip install -e .` from its root.
+
 ## Quick start
 
 ```python
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.datasets import make_regression
 from sklearn.model_selection import train_test_split
-from uxplain import UncertaintyExplanationPipeline
+from uxplain import ConformalExplainer
 
 X, y = make_regression(n_samples=300, n_features=4, noise=15, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
-pipeline = UncertaintyExplanationPipeline(
+pipeline = ConformalExplainer(
     estimator=RandomForestRegressor(n_estimators=50, random_state=42),
     random_state=42,
 )

@@ -9,33 +9,37 @@ Install a published version with `python -m pip install uxplain`. To work with t
 checkout instead, run `python -m pip install -e ".[dev,release]"` from the repository
 root, preferably in a virtual environment created with `python -m venv .venv`.
 
+The examples below use the development 0.4 API, including `ConformalExplainer`,
+and require the supplied source checkout. For the examples alone,
+`python -m pip install -e .` is sufficient.
+
 ## Regression
 
 ```python
 from sklearn.datasets import make_regression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from uxplain import UncertaintyExplanationPipeline
+from uxplain import ConformalExplainer
 
 X, y = make_regression(n_samples=300, n_features=4, noise=15, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
-pipe = UncertaintyExplanationPipeline(
-    model=RandomForestRegressor(n_estimators=50, random_state=42),
+pipe = ConformalExplainer(
+    estimator=RandomForestRegressor(n_estimators=50, random_state=42),
     conformal_method="normalized",
     confidence=0.9,
     uncertainty_metric="width",
     random_state=42,
 )
 pipe.fit(X_train, y_train)
-result = pipe.explain(X_test[:5], show_plots=False)
+result = pipe.explain(X_test[:5])
 print(result.interval_width)
 ```
 
 The default regression method is `normalized`. A `standard` split-conformal
 regressor has constant interval width at a fixed coverage level, so width
 attributions are zero. CQR requires `conformal_method="cqr"` and two quantile
-regressors supplied as `lower_model` and `upper_model`.
+regressors supplied as `lower_estimator` and `upper_estimator`.
 
 `confidence=0.9` is the requested nominal coverage, not a posterior probability
 for an individual observation. Regression summaries are `width`, `lower`, `upper`
@@ -45,6 +49,49 @@ can also produce an empty interval (`lower > upper`). In that case `width`
 retains the signed endpoint difference, which is negative, and `midpoint` is
 only the arithmetic average of the endpoints. Clipping the difference at zero
 would change the explained function and invalidate the affine TreeSHAP shortcut.
+
+## Prediction and configuration
+
+`predict(X)` returns point values or class labels. `predict_interval(X)` returns
+regression endpoints, and `predict_set(X)` returns classification membership.
+`predict_p_values(X)` returns conformal p-values; `predict_proba(X)` exposes
+base-classifier probabilities. `score(X, y)` is R-squared or accuracy; use
+`evaluate(X, y)` for coverage and set size. CQR requires an explicit additional
+`estimator` for point prediction and scoring, or an explicit conformal scorer
+for model selection with an interval-only backend.
+
+Configure calibration through `calibration_size` (default 0.2) and
+`random_state` in the constructor. For a configured explainer:
+
+```python
+from sklearn.base import clone
+from uxplain import PDPUncertaintyExplainer
+
+pdp = clone(pipe).set_params(
+    explainer=PDPUncertaintyExplainer(features=[0, 1], kind="both", grid_resolution=30),
+)
+pdp.fit(X_train, y_train)
+result = pdp.explain(X_test)
+result.plot(kind="pdp_ice")
+```
+
+Nested parameters such as `estimator__max_depth` and `explainer__grid_resolution`
+work with `set_params`. Refit after changing configuration. All `fit` methods
+return `self`; unknown parameters raise errors. `ConformalExplainer` supports
+`GridSearchCV` using the base estimator's point predictions and task tags.
+
+A supplied estimator can itself contain `Pipeline` and `ColumnTransformer`.
+Named columns are preserved and reconstructed for masked numeric inputs. Put
+preprocessing inside the base estimator so that it is fitted on proper training
+rows only. The built-in explainers operate on numeric tabular features;
+retaining column names does not add general support for arbitrary text inputs.
+
+`explain` does not display figures by default. Use `result.plot` explicitly.
+PDP/ICE bands show the pointwise central 50% and 90% of individual curves;
+they describe heterogeneity, not confidence intervals. Set `ice_style="lines"`
+in `result.plot(kind="pdp_ice", ice_style="lines")` to show individual curves.
+`importance_plot(table)` draws ordered dots and bootstrap intervals. Pass the
+same `order` to multiple panels to align their features.
 
 ## Calibration
 
@@ -74,13 +121,13 @@ X, y = make_classification(
     n_redundant=0, random_state=42,
 )
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
-pipe = UncertaintyExplanationPipeline(
-    model=RandomForestClassifier(n_estimators=50, random_state=42),
+pipe = ConformalExplainer(
+    estimator=RandomForestClassifier(n_estimators=50, random_state=42),
     uncertainty_metric="set_size",
     random_state=42,
 )
 pipe.fit(X_train, y_train)
-result = pipe.explain(X_test[:5], show_plots=False)
+result = pipe.explain(X_test[:5])
 print(result.classes)
 print(result.prediction_set)
 ```
@@ -90,14 +137,14 @@ same position in `result.classes`. Classification defaults to `standard`;
 `class_cond` calibrates by class, and `mondrian` by a fitted partition. Available
 summaries are `set_size`, `credibility` (maximum conformal p-value) and `confidence`
 (one minus the second-largest p-value). The last summary is distinct from the
-pipeline's nominal-coverage argument of the same name.
+conformal explainer's nominal-coverage argument of the same name.
 
 ## Explainers and data
 
-Choose `xai_method="shap"`, `"pdp"` or `"lime"` when constructing the pipeline.
+Choose `xai_method="shap"`, `"pdp"` or `"lime"` when constructing `ConformalExplainer`.
 `result.explanation_values` contains the corresponding explanation object. SHAP's
 fast path applies to supported affine summaries of tree models; unsupported cases
-use the generic explainer. Set `fast_shap=False` to request the generic path.
+use the generic explainer. Set `fast_path=False` to request the generic path.
 
 See the [example notebooks](https://github.com/torodriguezt/uxplain/tree/main/notebooks)
 for plotting, PDP interactions, LIME and custom predictors. The

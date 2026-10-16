@@ -4,7 +4,7 @@ import pytest
 
 from uxplain import (
     ClassificationExplanationResult,
-    UncertaintyExplanationPipeline,
+    ConformalExplainer,
 )
 from uxplain.plots import (
     generate_lime_plots,
@@ -41,6 +41,7 @@ def test_waterfall_requires_real_baseline():
 def test_waterfall_preserves_total_when_features_are_grouped():
     import matplotlib.pyplot as plt
     import shap
+
     from uxplain import shap_waterfall
 
     values = np.array([[0.8, -0.4, 0.15, -0.05]])
@@ -57,6 +58,7 @@ def test_waterfall_preserves_total_when_features_are_grouped():
 def test_importance_panels_use_the_requested_common_order():
     import matplotlib.pyplot as plt
     import pandas as pd
+
     from uxplain import importance_plot
 
     table = pd.DataFrame({"importance": [0.8, 0.2], "ci_lower": [0.7, 0.1],
@@ -84,7 +86,7 @@ def test_pdp_interaction_with_constant_feature():
 @pytest.fixture(scope="module")
 def regression_shap_result(data):
     from sklearn.linear_model import Ridge
-    pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="shap")
+    pipeline = ConformalExplainer(estimator=Ridge(), xai_method="shap")
     pipeline.fit(data["X_train"], data["y_train"])
     return pipeline, pipeline.explain(data["X_test"][:5], show_plots=False)
 
@@ -92,7 +94,7 @@ def regression_shap_result(data):
 @pytest.fixture(scope="module")
 def regression_pdp_result(data):
     from sklearn.linear_model import Ridge
-    pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="pdp")
+    pipeline = ConformalExplainer(estimator=Ridge(), xai_method="pdp")
     pipeline.fit(data["X_train"], data["y_train"])
     return pipeline, pipeline.explain(data["X_test"][:5], show_plots=False)
 
@@ -100,7 +102,7 @@ def regression_pdp_result(data):
 @pytest.fixture(scope="module")
 def regression_lime_result(data):
     from sklearn.linear_model import Ridge
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=Ridge(), xai_method="lime", n_lime_samples=50,
     )
     pipeline.fit(data["X_train"], data["y_train"])
@@ -109,7 +111,7 @@ def regression_lime_result(data):
 
 @pytest.fixture
 def classification_shap_result(classification_data, classifier):
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=classifier, task="classification", xai_method="shap",
     )
     pipeline.fit(

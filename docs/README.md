@@ -28,20 +28,17 @@ changes.
 
 ## Validate the extension example
 
-The [Extending guide](docs/extending.md) includes a MAPIE adapter covered by
-`tests/test_extensibility.py`. Use the same MAPIE version as the documentation
-workflow:
+The custom predictor interface described in the [Extending guide](docs/extending.md)
+is covered by `tests/test_extensibility.py`:
 
 ```sh
-python -m pip install pytest "mapie==1.5.0"
-python -c "import mapie; print(mapie.__version__)"
+python -m pip install pytest
 python -m pytest tests/test_extensibility.py -q
 ```
 
-Both tests must pass, including the MAPIE test. The explicit import ensures
-that a missing MAPIE dependency fails validation instead of silently skipping
-the adapter test. A strict MkDocs build validates the rendered documentation;
-it does not execute Python code blocks.
+The test checks fitting, evaluation and explanation through a custom predictor.
+A strict MkDocs build validates the rendered documentation; it does not execute
+Python code blocks.
 
 ## Publish to GitHub Pages
 

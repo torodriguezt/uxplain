@@ -1,4 +1,5 @@
 from sklearn.exceptions import NotFittedError
+
 """Fitted-object API: scikit-learn conventions, summaries, results and explanations."""
 
 import matplotlib
@@ -10,6 +11,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
 from sklearn.linear_model import Ridge
 
 from uxplain import (
+    ConformalExplainer,
     CQRConformalPredictor,
     CrepesConformalClassifier,
     CrepesConformalPredictor,
@@ -20,7 +22,6 @@ from uxplain import (
     ShapExplanation,
     ShapUncertaintyExplainer,
     UncertaintyExplanation,
-    UncertaintyExplanationPipeline,
     importance_table,
 )
 
@@ -28,7 +29,7 @@ matplotlib.use("Agg")
 
 
 def _cqr_pipeline(**kwargs):
-    return UncertaintyExplanationPipeline(
+    return ConformalExplainer(
         conformal_predictor=CQRConformalPredictor(
             GradientBoostingRegressor(loss="quantile", alpha=0.05, n_estimators=20,
                                       random_state=0),
@@ -42,7 +43,7 @@ def _cqr_pipeline(**kwargs):
 
 class TestScikitLearnConventions:
     def test_constructor_stores_parameters_unchanged(self):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
+        pipeline = ConformalExplainer(estimator=Ridge())
         params = pipeline.get_params(deep=False)
         assert params["task"] == "auto"
         assert params["uncertainty_metric"] is None
@@ -68,20 +69,20 @@ class TestScikitLearnConventions:
 
     def test_fit_does_not_modify_supplied_components(self, data):
         estimator = Ridge()
-        pipeline = UncertaintyExplanationPipeline(estimator=estimator, random_state=0)
+        pipeline = ConformalExplainer(estimator=estimator, random_state=0)
         pipeline.fit(data["X_train"], data["y_train"])
         assert not hasattr(estimator, "coef_")
         assert pipeline.conformal_predictor_.estimator is not estimator
         assert hasattr(pipeline.conformal_predictor_.estimator_, "coef_")
 
     def test_set_params_is_validated_at_fit(self, data):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
+        pipeline = ConformalExplainer(estimator=Ridge())
         pipeline.set_params(uncertainty_metric="set_size")
         with pytest.raises(ValueError, match="not valid for regression"):
             pipeline.fit(data["X_train"], data["y_train"])
 
     def test_set_params_changes_the_fitted_pipeline(self, data):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge(), random_state=0)
+        pipeline = ConformalExplainer(estimator=Ridge(), random_state=0)
         pipeline.set_params(confidence=0.5).fit(data["X_train"], data["y_train"])
         narrow = pipeline.evaluate(data["X_test"], data["y_test"])
         pipeline.set_params(confidence=0.95).fit(data["X_train"], data["y_train"])
@@ -89,8 +90,8 @@ class TestScikitLearnConventions:
         assert wide.loc["overall", "mean_size"] > narrow.loc["overall", "mean_size"]
 
     def test_repr_lists_parameters(self):
-        text = repr(UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="pdp"))
-        assert text.startswith("UncertaintyExplanationPipeline(")
+        text = repr(ConformalExplainer(estimator=Ridge(), xai_method="pdp"))
+        assert text.startswith("ConformalExplainer(")
         assert "xai_method='pdp'" in text
         assert "object at 0x" not in text
 
@@ -110,7 +111,7 @@ class TestScikitLearnConventions:
 
     def test_fitted_attributes(self, data):
         frame = pd.DataFrame(data["X_train"], columns=list("abcd"))
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge()).fit(frame, data["y_train"])
+        pipeline = ConformalExplainer(estimator=Ridge()).fit(frame, data["y_train"])
         assert pipeline.task_ == "regression"
         assert pipeline.uncertainty_metric_ == "width"
         assert pipeline.conformal_method_ == "normalized"
@@ -119,7 +120,7 @@ class TestScikitLearnConventions:
         assert pipeline.n_train_ + pipeline.n_calibration_ == len(frame)
 
     def test_cp_alias_is_deprecated(self, data):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
+        pipeline = ConformalExplainer(estimator=Ridge())
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.warns(FutureWarning, match="conformal_predictor_"):
             assert pipeline.cp is pipeline.conformal_predictor_
@@ -143,7 +144,7 @@ class TestSummaryAndPrediction:
 
     def test_classification_summary_and_p_values(self, classification_data, classifier):
         d = classification_data
-        pipeline = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
+        pipeline = ConformalExplainer(estimator=classifier, random_state=0)
         pipeline.fit(d["X_train"], d["y_train"], X_calib=d["X_calib"], y_calib=d["y_calib"])
         p_values = pipeline.predict_p_values(d["X_test"])
         assert p_values.shape == (len(d["X_test"]), len(pipeline.classes_))
@@ -152,7 +153,7 @@ class TestSummaryAndPrediction:
         assert pipeline.summary()["classes"] == 3
 
     def test_predict_p_values_is_classification_only(self, data):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
+        pipeline = ConformalExplainer(estimator=Ridge())
         pipeline.fit(data["X_train"], data["y_train"])
         with pytest.raises(AttributeError, match="classification"):
             pipeline.predict_p_values(data["X_test"])
@@ -165,7 +166,7 @@ class TestExplanationClasses:
         ("pdp", PDPExplanation, {"kind": "both"}),
     ])
     def test_common_interface(self, data, xai_method, kind, extra):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=Ridge(), xai_method=xai_method, n_lime_samples=50, random_state=0,
         ).fit(pd.DataFrame(data["X_train"], columns=list("abcd")), data["y_train"])
         X = pd.DataFrame(data["X_test"][:6], columns=list("abcd"))
@@ -204,7 +205,7 @@ class TestExplanationClasses:
         assert result.to_frame().columns.tolist() == ["lower", "upper", "width"]
 
         d = classification_data
-        classification = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
+        classification = ConformalExplainer(estimator=classifier, random_state=0)
         classification.fit(d["X_train"], d["y_train"])
         outcome = classification.explain(d["X_test"][:4], show_plots=False)
         assert repr(outcome).startswith("ClassificationExplanationResult(rows=4, classes=3")

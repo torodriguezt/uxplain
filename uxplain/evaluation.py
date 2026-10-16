@@ -8,7 +8,9 @@ Summaries of fitted conformal predictors and of their explanations.
   optionally with bootstrap intervals over the explained rows.
 
 Both return `pandas.DataFrame` objects, so they print, compare and
-export like any other table. `uxplain.UncertaintyExplanationPipeline`
+export like any other table. Coverage tables display four decimal places while
+retaining the full numerical precision for calculations and exports.
+`uxplain.ConformalExplainer`
 exposes the first as ``evaluate()``; explanations and results expose the second
 as ``feature_importance()``.
 """
@@ -21,6 +23,52 @@ import numpy as np
 import pandas as pd
 
 __all__ = ["coverage_table", "importance_table"]
+
+
+class EvaluationTable(pd.DataFrame):
+    """A DataFrame with four-decimal display and unrounded numerical values.
+
+    Pass ``float_format`` to ``to_string()`` or ``to_html()`` to override the
+    display format. Numeric operations and exports such as ``to_csv()`` use
+    the original values. DataFrame selections and copies retain this display.
+    """
+
+    @property
+    def _constructor(self):
+        return EvaluationTable
+
+    def to_string(self, buf=None, *, float_format=None, **kwargs):
+        """Format as text, displaying floats to four decimals by default."""
+        if float_format is None:
+            float_format = "{:.4f}".format
+        return super().to_string(buf, float_format=float_format, **kwargs)
+
+    def to_html(self, buf=None, *, float_format=None, **kwargs):
+        """Format as HTML, displaying floats to four decimals by default."""
+        if float_format is None:
+            float_format = "{:.4f}".format
+        return super().to_html(buf, float_format=float_format, **kwargs)
+
+    def _repr_html_(self):
+        """Use the same precision for notebook display without global options."""
+        if not pd.get_option("display.notebook_repr_html"):
+            return None
+        max_rows = pd.get_option("display.max_rows")
+        max_cols = pd.get_option("display.max_columns")
+        truncated = (max_rows and len(self) > max_rows) or (
+            max_cols and len(self.columns) > max_cols
+        )
+        if truncated and pd.get_option("display.large_repr") == "info":
+            return super()._repr_html_()
+        min_rows = pd.get_option("display.min_rows")
+        if max_rows and len(self) > max_rows and min_rows:
+            max_rows = min(max_rows, min_rows)
+        return self.to_html(
+            notebook=True,
+            max_rows=max_rows,
+            max_cols=max_cols,
+            show_dimensions=pd.get_option("display.show_dimensions"),
+        )
 
 
 def _covered_and_size(prediction, y, classes):
@@ -68,7 +116,8 @@ def coverage_table(prediction, y, classes=None, groups=None) -> pd.DataFrame:
     pandas.DataFrame
         Columns ``n``, ``coverage``, ``mean_size``, ``median_size`` and
         ``share_empty``. Size is the signed interval width (negative for empty
-        CQR sets) or the number of labels in the set.
+        CQR sets) or the number of labels in the set. Floats display with four
+        decimal places; calculations and exports retain full precision.
     """
 
     covered, size = _covered_and_size(prediction, y, classes)
@@ -86,7 +135,7 @@ def coverage_table(prediction, y, classes=None, groups=None) -> pd.DataFrame:
         for label in labels:
             rows[label] = frame[groups == label]
 
-    table = pd.DataFrame(
+    table = EvaluationTable(
         {
             "n": [len(f) for f in rows.values()],
             "coverage": [f["covered"].mean() for f in rows.values()],
