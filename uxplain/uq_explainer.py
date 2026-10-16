@@ -1,5 +1,5 @@
 """
-Main pipeline for uncertainty explanation.
+Main estimator for conformal prediction and explanation.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ class _ResultMethods:
 
 @dataclass(repr=False)
 class ExplanationResult(_ResultMethods):
-    """Result of `UncertaintyExplanationPipeline.explain` for regression.
+    """Result of `ConformalExplainer.explain` for regression.
 
     Attributes
     ----------
@@ -161,7 +161,7 @@ class ExplanationResult(_ResultMethods):
 
 @dataclass(repr=False)
 class ClassificationExplanationResult(_ResultMethods):
-    """Result of `UncertaintyExplanationPipeline.explain` for classification.
+    """Result of `ConformalExplainer.explain` for classification.
 
     Attributes
     ----------
@@ -235,14 +235,14 @@ def _detect_task(
 
 
 # ---------------------------------------------------------------------------
-# Pipeline
+# Conformal explainer
 # ---------------------------------------------------------------------------
 
-class UncertaintyExplanationPipeline(BaseEstimator):
+class ConformalExplainer(BaseEstimator):
     """
-    Pipeline integrating conformal prediction and uncertainty explanation.
+    Estimator integrating conformal prediction and summary explanation.
 
-    The pipeline follows the scikit-learn estimator conventions: the
+    The conformal explainer follows the scikit-learn estimator conventions: the
     constructor stores its parameters unchanged, ``fit`` builds and fits
     the conformal predictor, and ``explain`` prepares the explainer on its
     first call. Fitted state ends in an
@@ -264,9 +264,9 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
     ```python
     from sklearn.ensemble import RandomForestRegressor
-    from uxplain import UncertaintyExplanationPipeline
+    from uxplain import ConformalExplainer
 
-    pipeline = UncertaintyExplanationPipeline(estimator=RandomForestRegressor())
+    pipeline = ConformalExplainer(estimator=RandomForestRegressor())
     pipeline.fit(X_train, y_train)
     result = pipeline.explain(X_test)
     print(pipeline.summary())
@@ -277,9 +277,9 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
     ```python
     from sklearn.ensemble import RandomForestClassifier
-    from uxplain import UncertaintyExplanationPipeline
+    from uxplain import ConformalExplainer
 
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         estimator=RandomForestClassifier(),
         task="classification",
         uncertainty_metric="set_size",
@@ -315,7 +315,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         fast_path: bool = True,
     ):
         """
-        Initialize pipeline.
+        Initialize the conformal explainer.
 
         Parameters
         ----------
@@ -377,7 +377,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         explainer : UncertaintyExplainerProtocol, optional
             Custom explainer instance. Overrides ``xai_method``. It is cloned
             at fit time; if it has a ``conformal_predictor`` attribute, the clone is bound to
-            the pipeline's fitted conformal predictor.
+            the conformal explainer's fitted conformal predictor.
 
         fast_path : bool
             When ``xai_method="shap"``, use exact TreeSHAP on the component
@@ -627,7 +627,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
             match the training columns when training used a DataFrame.
         confidence : float, optional
             Nominal coverage level, strictly between zero and one. Defaults to
-            the pipeline's ``confidence``. Custom backends may restrict the
+            the conformal explainer's ``confidence``. Custom backends may restrict the
             supported coverage levels.
 
         Returns
@@ -638,7 +638,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         Raises
         ------
         NotFittedError
-            If the pipeline has not been fitted.
+            If the conformal explainer has not been fitted.
         """
 
         self._check_is_fitted()
@@ -671,9 +671,9 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         Raises
         ------
         AttributeError
-            If this is a regression pipeline.
+            If this is a regression conformal explainer.
         NotFittedError
-            If the pipeline has not been fitted.
+            If the conformal explainer has not been fitted.
         """
 
         self._check_is_fitted()
@@ -696,7 +696,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
             Group of each observation, e.g. ``y`` itself for per-class
             coverage. Adds one row per group.
         confidence : float, optional
-            Nominal coverage level; defaults to the pipeline's ``confidence``.
+            Nominal coverage level; defaults to the conformal explainer's ``confidence``.
 
         Returns
         -------
@@ -705,7 +705,9 @@ class UncertaintyExplanationPipeline(BaseEstimator):
             ``mean_size``, ``median_size`` and ``share_empty``. Size is the
             signed interval width (regression) or the prediction-set size
             (classification). Labels unknown to the fitted estimator count as
-            uncovered.
+            uncovered. Floats display with four decimal places; calculations
+            and exports retain full precision. Use ``to_string(float_format=...)``
+            or ``to_html(float_format=...)`` to customize the display.
         """
 
         self._check_is_fitted()
@@ -755,7 +757,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
 
     def summary(self) -> pd.Series:
         """
-        Configuration and fitted state of the pipeline, one entry per line.
+        Configuration and fitted state of the conformal explainer, one entry per line.
 
         Returns
         -------
@@ -834,7 +836,7 @@ class UncertaintyExplanationPipeline(BaseEstimator):
         Returns
         -------
         ExplanationResult or ClassificationExplanationResult
-            Conformal predictions at the pipeline's ``confidence`` and the
+            Conformal predictions at the conformal explainer's ``confidence`` and the
             explanation of ``uncertainty_metric_``. Use ``to_frame``,
             ``feature_importance`` and ``plot`` on the returned result.
         """
@@ -1049,3 +1051,8 @@ class UncertaintyExplanationPipeline(BaseEstimator):
                     f"Choose from {valid}"
                 )
         return kind
+
+
+# Keep the original public name and module path available for existing imports
+# and pickles created before the class was named ConformalExplainer.
+UncertaintyExplanationPipeline = ConformalExplainer

@@ -48,6 +48,7 @@ from uxplain.uncertainty.metrics import (
 )
 from uxplain.uq_explainer import (
     ClassificationExplanationResult,
+    ConformalExplainer,
     ExplanationResult,
     UncertaintyExplanationPipeline,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "ClassificationExplanationResult",
     "ClassificationMetric",
     "ConformalClassifierProtocol",
+    "ConformalExplainer",
     "ConformalMethod",
     "ConformalPredictorProtocol",
     "CrepesConformalClassifier",
