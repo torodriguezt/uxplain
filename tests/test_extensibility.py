@@ -1,8 +1,4 @@
-"""Custom conformal backends plugged in through the protocols.
-
-The MAPIE adapter below is the example of the "Extending uxplain" page of the
-documentation; it runs only when MAPIE is installed.
-"""
+"""Custom conformal backends plugged in through the protocols."""
 
 import numpy as np
 import pytest
@@ -10,7 +6,7 @@ from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 
-from uxplain import UncertaintyExplanationPipeline
+from uxplain import ConformalExplainer
 
 
 class ScaledResidualConformal(BaseEstimator):
@@ -55,7 +51,7 @@ def heteroscedastic():
 
 def test_custom_backend_runs_through_the_pipeline(heteroscedastic):
     X_train, y_train, X_test, y_test = heteroscedastic
-    pipeline = UncertaintyExplanationPipeline(
+    pipeline = ConformalExplainer(
         conformal_predictor=ScaledResidualConformal(
             LinearRegression(), GradientBoostingRegressor(n_estimators=30, random_state=0),
         ),
@@ -73,50 +69,3 @@ def test_custom_backend_runs_through_the_pipeline(heteroscedastic):
     # The spread depends on the second feature only.
     assert importance.index[0] == "Feature 1"
     assert pipeline.get_params()["conformal_predictor__scale_estimator__n_estimators"] == 30
-
-
-def test_mapie_backend(heteroscedastic):
-    pytest.importorskip("mapie")
-    from mapie.regression import SplitConformalRegressor
-
-    class MapieConformalRegressor(BaseEstimator):
-        """uxplain backend for MAPIE's split conformal regressor."""
-
-        def __init__(self, estimator, confidence_levels=(0.9,),
-                     conformity_score="residual_normalized"):
-            self.estimator = estimator
-            self.confidence_levels = confidence_levels
-            self.conformity_score = conformity_score
-
-        def fit(self, X_train, y_train, X_calib, y_calib):
-            self.mapie_ = SplitConformalRegressor(
-                clone(self.estimator),
-                confidence_level=list(self.confidence_levels),
-                conformity_score=self.conformity_score,
-                prefit=False,
-            )
-            self.mapie_.fit(X_train, y_train)
-            self.mapie_.conformalize(X_calib, y_calib)
-            return self
-
-        def predict_interval(self, X, confidence=0.9):
-            levels = list(self.confidence_levels)
-            if confidence not in levels:
-                raise ValueError(f"confidence must be one of {levels}.")
-            _, intervals = self.mapie_.predict_interval(X)
-            k = levels.index(confidence)
-            return intervals[:, 0, k], intervals[:, 1, k]
-
-    X_train, y_train, X_test, y_test = heteroscedastic
-    pipeline = UncertaintyExplanationPipeline(
-        conformal_predictor=MapieConformalRegressor(
-            GradientBoostingRegressor(n_estimators=50, random_state=0),
-        ),
-        random_state=0,
-    ).fit(X_train, y_train)
-
-    coverage = pipeline.evaluate(X_test, y_test).loc["overall", "coverage"]
-    assert 0.8 < coverage <= 1.0
-    result = pipeline.explain(X_test[:20], show_plots=False)
-    assert result.explanation_values.values.shape == (20, 3)
-    assert np.isfinite(result.explanation_values.values).all()

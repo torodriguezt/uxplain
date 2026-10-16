@@ -4,9 +4,9 @@ from sklearn.linear_model import Ridge
 
 from uxplain import (
     ClassificationExplanationResult,
+    ConformalExplainer,
     CrepesConformalClassifier,
     CrepesConformalPredictor,
-    UncertaintyExplanationPipeline,
 )
 from uxplain.uncertainty.metrics import (
     METRIC_LABELS,
@@ -89,7 +89,7 @@ class TestMetricLabel:
 class TestPipelineMetric:
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_shap(self, data, metric):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=Ridge(), xai_method="shap", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
@@ -100,7 +100,7 @@ class TestPipelineMetric:
 
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_pdp(self, data, metric):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=Ridge(), xai_method="pdp", uncertainty_metric=metric,
         )
         pipeline.fit(data["X_train"], data["y_train"])
@@ -110,7 +110,7 @@ class TestPipelineMetric:
 
     @pytest.mark.parametrize("metric", ["width", "lower", "upper", "midpoint"])
     def test_pipeline_propagates_metric_to_lime(self, data, metric):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=Ridge(),
             xai_method="lime",
             uncertainty_metric=metric,
@@ -122,7 +122,7 @@ class TestPipelineMetric:
         assert result.explanation_values.metric == metric
 
     def test_default_metric_is_width(self, data):
-        pipeline = UncertaintyExplanationPipeline(estimator=Ridge())
+        pipeline = ConformalExplainer(estimator=Ridge())
         assert pipeline.uncertainty_metric is None  # the parameter is stored as given
         pipeline.fit(data["X_train"], data["y_train"])
         assert pipeline.uncertainty_metric_ == "width"
@@ -247,7 +247,7 @@ class TestClassificationPipelineMetric:
         self, classification_data, classifier, method,
     ):
         cp = CrepesConformalClassifier(classifier, smoothing=True, random_state=42)
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             conformal_predictor=cp, xai_method=method,
         )
         pipeline.fit(
@@ -263,7 +263,7 @@ class TestClassificationPipelineMetric:
         "metric", ["set_size", "credibility", "confidence"],
     )
     def test_pipeline_propagates_metric(self, classification_data, classifier, metric):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier,
             task="classification",
             uncertainty_metric=metric,
@@ -282,7 +282,7 @@ class TestClassificationPipelineMetric:
     def test_default_metric_is_set_size_for_classification(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
         )
         pipeline.fit(classification_data["X_train"], classification_data["y_train"])
@@ -291,7 +291,7 @@ class TestClassificationPipelineMetric:
 
     def test_invalid_classification_metric_raises(self, classifier):
         with pytest.raises(ValueError, match="not valid for classification"):
-            UncertaintyExplanationPipeline(
+            ConformalExplainer(
                 estimator=classifier,
                 task="classification",
                 uncertainty_metric="width",
@@ -299,7 +299,7 @@ class TestClassificationPipelineMetric:
 
     def test_margin_rejected_at_pipeline_level(self, classifier):
         with pytest.raises(ValueError, match="not valid for classification"):
-            UncertaintyExplanationPipeline(
+            ConformalExplainer(
                 estimator=classifier,
                 task="classification",
                 uncertainty_metric="margin",

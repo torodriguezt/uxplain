@@ -1,20 +1,20 @@
-from sklearn.exceptions import NotFittedError
 import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
 import shap
+from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import Ridge
 
 from uxplain import (
     ClassificationExplanationResult,
+    ConformalExplainer,
     CQRConformalPredictor,
     CrepesConformalClassifier,
     ExplanationResult,
     LIMEExplanation,
     ShapExplanation,
     UncertaintyExplanation,
-    UncertaintyExplanationPipeline,
 )
 from uxplain.explainability.pdp_explainer import PDPExplanation, PDPUncertaintyExplainer
 from uxplain.plots import generate_pdp_plots
@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 # ---------------------------------------------------------------------------
 
 def _make_pipeline(xai_method="shap", **kwargs):
-    return UncertaintyExplanationPipeline(
+    return ConformalExplainer(
         estimator=Ridge(),
         xai_method=xai_method,
         **kwargs,
@@ -42,19 +42,19 @@ def _make_pipeline(xai_method="shap", **kwargs):
 class TestInit:
     def test_invalid_task_is_rejected(self):
         with pytest.raises(ValueError, match="Unknown task"):
-            UncertaintyExplanationPipeline(estimator=Ridge(), task="clasification").fit(np.ones((8, 2)), np.zeros(8))
+            ConformalExplainer(estimator=Ridge(), task="clasification").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_requires_model_or_conformal_predictor(self):
         with pytest.raises(ValueError, match="estimator.*conformal_predictor"):
-            UncertaintyExplanationPipeline().fit(np.ones((8, 2)), np.zeros(8))
+            ConformalExplainer().fit(np.ones((8, 2)), np.zeros(8))
 
     def test_invalid_xai_method_raises(self):
         with pytest.raises(ValueError, match="Unknown xai_method"):
-            UncertaintyExplanationPipeline(estimator=Ridge(), xai_method="unknown").fit(np.ones((8, 2)), np.zeros(8))
+            ConformalExplainer(estimator=Ridge(), xai_method="unknown").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_custom_conformal_predictor_accepted(self, data, quantile_lower, quantile_upper):
         cp = CQRConformalPredictor(quantile_lower, quantile_upper)
-        pipeline = UncertaintyExplanationPipeline(conformal_predictor=cp)
+        pipeline = ConformalExplainer(conformal_predictor=cp)
         pipeline.fit(data["X_train"], data["y_train"], X_calib=data["X_calib"], y_calib=data["y_calib"])
         lower, _ = pipeline.predict_interval(data["X_test"])
         assert lower.shape == (len(data["X_test"]),)
@@ -373,25 +373,25 @@ class TestClassificationPipeline:
     def test_auto_detects_classification_from_classifier(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(estimator=classifier)
+        pipeline = ConformalExplainer(estimator=classifier)
         assert pipeline.task == "auto"  # the parameter is stored as given
         pipeline.fit(classification_data["X_train"], classification_data["y_train"])
         assert pipeline.task_ == "classification"
 
     def test_classification_requires_model(self):
         with pytest.raises(ValueError, match="classification.*requires a 'estimator'"):
-            UncertaintyExplanationPipeline(task="classification").fit(np.ones((8, 2)), np.zeros(8))
+            ConformalExplainer(task="classification").fit(np.ones((8, 2)), np.zeros(8))
 
     def test_invalid_conformal_method_for_classification(self, classifier):
         with pytest.raises(ValueError, match="not valid for"):
-            UncertaintyExplanationPipeline(
+            ConformalExplainer(
                 estimator=classifier,
                 task="classification",
                 conformal_method="normalized",
             ).fit(np.ones((8, 2)), np.zeros(8))
 
     def test_predict_returns_prediction_set(self, classification_data, classifier):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
         )
         pipeline.fit(
@@ -407,7 +407,7 @@ class TestClassificationPipeline:
     def test_explain_returns_classification_result(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification", xai_method="shap",
         )
         pipeline.fit(
@@ -433,7 +433,7 @@ class TestClassificationPipeline:
         self, classification_data, classifier, xai_method,
     ):
         kwargs = {"n_lime_samples": 50} if xai_method == "lime" else {}
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier,
             task="classification",
             xai_method=xai_method,
@@ -451,7 +451,7 @@ class TestClassificationPipeline:
     def test_default_conformal_method_is_standard(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
         )
         pipeline.fit(
@@ -463,7 +463,7 @@ class TestClassificationPipeline:
     def test_conformal_method_class_cond_and_mondrian(
         self, classification_data, classifier, method,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification", conformal_method=method,
         )
         pipeline.fit(
@@ -479,7 +479,7 @@ class TestClassificationPipeline:
     def test_classification_auto_calib_split(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification", random_state=0,
         )
         pipeline.set_params(calibration_size=0.2).fit(
@@ -492,7 +492,7 @@ class TestClassificationPipeline:
     def test_auto_split_is_independent_of_labels_and_features(
         self, classifier, monkeypatch, split_seed,
     ):
-        pipeline = UncertaintyExplanationPipeline(estimator=classifier, random_state=0)
+        pipeline = ConformalExplainer(estimator=classifier, random_state=0)
         splits = []
         monkeypatch.setattr(CrepesConformalClassifier, "fit",
                             lambda self, *arrays: splits.append(arrays))
@@ -517,7 +517,7 @@ class TestClassificationPipeline:
     def test_classification_pdp_explanation_values_type(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification", xai_method="pdp",
         )
         pipeline.fit(
@@ -532,7 +532,7 @@ class TestClassificationPipeline:
     def test_classification_lime_explanation_values_type(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
             xai_method="lime", n_lime_samples=50,
         )
@@ -551,7 +551,7 @@ class TestClassificationPipeline:
     def test_prediction_set_consistent_with_p_values(
         self, classification_data, classifier,
     ):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
         )
         pipeline.fit(
@@ -566,7 +566,7 @@ class TestClassificationPipeline:
 
     def test_explanation_is_deterministic(self, classification_data, classifier):
         """Explaining the same rows twice must give the same attributions."""
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
             uncertainty_metric="credibility",
         )
@@ -579,7 +579,7 @@ class TestClassificationPipeline:
         np.testing.assert_array_equal(first, second)
 
     def test_explain_uncertainty_alias(self, classification_data, classifier):
-        pipeline = UncertaintyExplanationPipeline(
+        pipeline = ConformalExplainer(
             estimator=classifier, task="classification",
         )
         pipeline.fit(
