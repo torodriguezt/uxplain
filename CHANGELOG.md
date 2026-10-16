@@ -3,6 +3,11 @@
 ## 0.4.0 (development)
 
 ### Changed
+- Display evaluation tables with four decimal places by default, while
+  preserving full numerical precision for calculations and data exports.
+- Rename the main estimator to `ConformalExplainer`. The previous name,
+  `UncertaintyExplanationPipeline`, remains an alias in both the package root
+  and its original module, preserving imports and existing pickles.
 - `predict(X)` now returns point predictions or class labels. Use
   `predict_interval(X)` for endpoints and `predict_set(X)` for label sets.
   CQR accepts an optional `estimator` for point prediction; it does not
@@ -11,7 +16,7 @@
   `lower_estimator`/`upper_estimator`, and `predict_p` to `predict_p_values`.
   Explainers consistently use `conformal_predictor` and `uncertainty_metric`;
   `fast_path` selects the SHAP shortcut. Algorithm reports end in `_`.
-- Configure `calibration_size` and `random_state` in the pipeline constructor;
+- Configure `calibration_size` and `random_state` in the main estimator constructor;
   use `fit(X, y, *, X_calib=None, y_calib=None, X_background=None)` for data.
   All explainers return `self` from `fit`. Configure them through constructors
   or nested `set_params`; explanation-time configuration is deprecated.
